@@ -20,6 +20,10 @@ float roleFit(Role native, Role duty);
 // Order going P1 -> P6 from the setter: S, OH, MB, OPP, OH, MB.
 Role fiveOneDuty(Slot slot, Slot setterSlot);
 
+// Same for any system. 6-2 and 4-2 replace the opposite with a second setter:
+// S, OH, MB, S, OH, MB.
+Role systemDuty(System system, Slot slot, Slot setterSlot);
+
 // Rounded percentage for the HUD "Fit %" badge.
 int roleFitPercent(Role native, Role duty);
 

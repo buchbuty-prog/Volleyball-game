@@ -139,12 +139,12 @@ std::optional<RotationManager> RotationManager::create(const LineupSpec& spec, R
     }
     for (int i = 0; i < kSlots; ++i) {
         const Player& p = spec.starters[i];
-        rm.duties_.push_back({p.id, p.role, fiveOneDuty(slotAt(i), setter)});
+        rm.duties_.push_back({p.id, p.role, systemDuty(spec.system, slotAt(i), setter)});
     }
 
     if (spec.libero) {
         const Role liberoDuty = (mode == RuleMode::Arcade && spec.liberoStartSlot)
-                                    ? fiveOneDuty(*spec.liberoStartSlot, setter)
+                                    ? systemDuty(spec.system, *spec.liberoStartSlot, setter)
                                     : Role::Libero;
         rm.duties_.push_back({spec.libero->id, spec.libero->role, liberoDuty});
 

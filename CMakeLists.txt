@@ -8,6 +8,7 @@ add_library(vc26_core
     core/src/Types.cpp
     core/src/RoleFit.cpp
     core/src/RotationManager.cpp
+    core/src/MatchScore.cpp
 )
 target_include_directories(vc26_core PUBLIC core/include)
 if(MSVC)

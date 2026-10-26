@@ -16,7 +16,8 @@ struct LineupSpec {
     std::optional<Player> libero;          // designated libero, if any
     std::optional<Slot> liberoStartSlot;   // slot the libero takes over before the first serve
     std::vector<int> liberoTargets;        // ids the libero may replace; empty = the player in liberoStartSlot
-    std::optional<Slot> setterSlot;        // overrides the 5-1 anchor; default = first Setter starter, else P1
+    System system = System::FiveOne;
+    std::optional<Slot> setterSlot;        // overrides the system anchor; default = first Setter starter, else P1
 };
 
 struct LineupIssue {

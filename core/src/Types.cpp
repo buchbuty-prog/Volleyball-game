@@ -27,4 +27,13 @@ const char* toString(Legality l) {
     return "?";
 }
 
+const char* toString(System s) {
+    switch (s) {
+        case System::FiveOne: return "5-1";
+        case System::SixTwo: return "6-2";
+        case System::FourTwo: return "4-2";
+    }
+    return "?";
+}
+
 }  // namespace vc26

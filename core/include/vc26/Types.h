@@ -13,6 +13,10 @@ enum class Role : std::uint8_t { Setter, OutsideHitter, MiddleBlocker, Opposite,
 // Simulation = strict FIVB rules. Arcade = "house rules" (GDD 1.7).
 enum class RuleMode : std::uint8_t { Simulation, Arcade };
 
+// Team rotation system (GDD 2.B tactical board). In 4-2 and 6-2 the second
+// setter starts opposite the first, in the slot a 5-1 gives the opposite.
+enum class System : std::uint8_t { FiveOne, SixTwo, FourTwo };
+
 // Rotational slots, numbered as on the official score sheet.
 // P1 = right back (server), P2 = right front, P3 = middle front,
 // P4 = left front, P5 = left back, P6 = middle back.
@@ -43,5 +47,6 @@ using Court = std::array<Player, kSlots>;
 const char* toString(Slot s);
 const char* toString(Role r);
 const char* toString(Legality l);
+const char* toString(System s);
 
 }  // namespace vc26

@@ -4,6 +4,7 @@
 #include <functional>
 #include <vector>
 
+#include "vc26/MatchScore.h"
 #include "vc26/RoleFit.h"
 #include "vc26/RotationManager.h"
 
@@ -235,6 +236,83 @@ TEST(server_is_exempt) {
     pos[index(Slot::P1)] = CourtPos{0.5f, 1.0f};  // anywhere
     CHECK(checkOverlap(pos, true).empty());
     CHECK(checkOverlap(pos, false).size() == 2);  // receiving P1 is not exempt
+}
+
+// --- Systems ----------------------------------------------------------------
+
+TEST(six_two_has_two_setters) {
+    CHECK(systemDuty(System::SixTwo, Slot::P1, Slot::P1) == Role::Setter);
+    CHECK(systemDuty(System::SixTwo, Slot::P4, Slot::P1) == Role::Setter);
+    CHECK(systemDuty(System::FourTwo, Slot::P6, Slot::P3) == Role::Setter);
+    CHECK(systemDuty(System::SixTwo, Slot::P3, Slot::P1) == Role::MiddleBlocker);
+    for (int i = 0; i < kSlots; ++i) {
+        CHECK(systemDuty(System::FiveOne, slotAt(i), Slot::P2) == fiveOneDuty(slotAt(i), Slot::P2));
+    }
+}
+
+TEST(six_two_second_setter_has_full_fit) {
+    LineupSpec spec = standardLineup();
+    spec.system = System::SixTwo;
+    spec.starters[index(Slot::P4)] = Player{OPP, Role::Setter};
+    auto rm = RotationManager::create(spec, RuleMode::Simulation, true);
+    CHECK(rm->dutyOf(OPP) == Role::Setter);
+    CHECK(rm->roleFitOf(OPP) == 1.0f);
+    CHECK(rm->dutyOf(S) == Role::Setter);  // first Setter starter anchors the system
+}
+
+// --- Match scoring ----------------------------------------------------------
+
+namespace {
+void score(MatchScore& m, Team t, int n) {
+    for (int i = 0; i < n; ++i) m.awardPoint(t);
+}
+}  // namespace
+
+TEST(indoor_set_needs_25_and_two_clear) {
+    MatchScore m;
+    score(m, Team::Home, 24);
+    CHECK(m.setPointFor() == Team::Home);
+    score(m, Team::Away, 24);
+    CHECK(!m.setPointFor());  // 24-24
+    PointResult r = m.awardPoint(Team::Home);
+    CHECK(!r.setWon && r.setPoint);  // 25-24 is not enough
+    r = m.awardPoint(Team::Home);
+    CHECK(r.setWon && !r.matchWon);
+    CHECK(m.sets(Team::Home) == 1 && m.points(Team::Home) == 0 && m.setNumber() == 2);
+}
+
+TEST(indoor_deciding_set_to_15_with_switch_at_8) {
+    MatchScore m;
+    for (int s = 0; s < 2; ++s) {
+        score(m, Team::Home, 25);
+        score(m, Team::Away, 25);
+    }
+    CHECK(m.isDecidingSet() && m.setNumber() == 5);
+    int switches = 0;
+    for (int i = 0; i < 7; ++i) switches += m.awardPoint(Team::Away).switchSides;
+    CHECK(switches == 0);
+    CHECK(m.awardPoint(Team::Away).switchSides);  // 0-8
+    CHECK(!m.awardPoint(Team::Home).switchSides);
+    score(m, Team::Away, 5);  // 1-13
+    CHECK(!m.isMatchPoint());
+    PointResult r = m.awardPoint(Team::Away);  // 1-14
+    CHECK(r.matchPoint && m.isMatchPoint());
+    r = m.awardPoint(Team::Away);
+    CHECK(r.matchWon && m.winner() == Team::Away && m.finished());
+    CHECK(!m.awardPoint(Team::Home).setWon);  // ignored after the match
+    CHECK(m.sets(Team::Away) == 3);
+}
+
+TEST(beach_best_of_three_switches_every_seven) {
+    MatchScore m(MatchRules::beach());
+    int switches = 0;
+    for (int i = 0; i < 14; ++i) switches += m.awardPoint(i % 2 ? Team::Home : Team::Away).switchSides;
+    CHECK(switches == 2);  // at 7 and 14 combined points
+    score(m, Team::Home, 14);  // 21-7
+    CHECK(m.sets(Team::Home) == 1);
+    score(m, Team::Home, 20);
+    CHECK(m.isMatchPoint());
+    CHECK(m.awardPoint(Team::Home).matchWon);
 }
 
 int main() {

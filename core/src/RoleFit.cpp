@@ -35,6 +35,11 @@ Role fiveOneDuty(Slot slot, Slot setterSlot) {
     return kFiveOneOrder[offset];
 }
 
+Role systemDuty(System system, Slot slot, Slot setterSlot) {
+    const Role d = fiveOneDuty(slot, setterSlot);
+    return (system != System::FiveOne && d == Role::Opposite) ? Role::Setter : d;
+}
+
 int roleFitPercent(Role native, Role duty) {
     return static_cast<int>(std::lround(roleFit(native, duty) * 100.0f));
 }

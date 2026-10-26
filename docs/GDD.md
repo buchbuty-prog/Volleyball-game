@@ -75,6 +75,9 @@ This is the system that lets a player select **any court position** (not just th
 | Libero automation | Same call; returns a `LiberoSwap` event for animation/VO hooks. At most one libero replacement per dead ball, satisfying the "completed rally between replacements" rule |
 | Overlap/positional fault at serve | `checkOverlap()` — FIVB 7.4.3 adjacent-pair rules, serving P1 exempt |
 | Role-Fit badge | `roleFit()`, `roleFitPercent()`, `RotationManager::roleFitOf()` |
+| 5-1 / 6-2 / 4-2 duties | `systemDuty()`, `LineupSpec::system` |
+| Set/match scoring, match-point cam and VO triggers | `MatchScore` (`MatchRules::indoor()` / `beach()`), `PointResult` events |
+| Playable rules demo | `docs/demo/rotation-lab.html` |
 
 ---
 

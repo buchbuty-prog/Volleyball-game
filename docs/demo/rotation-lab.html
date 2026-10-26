@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rotation Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: scoreboard strip on top, court as the hero, controls + log beside it (stacks on phones). */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --fg: #16202b;
+  --muted: #5b6876;
+  --line: #d3dae2;
+  --floor: #2f6f9e;        /* playing area */
+  --floor-zone: #e07a3c;   /* free zone */
+  --floor-line: #f4f7fa;
+  --slot-bg: rgba(255,255,255,.92);
+  --slot-fg: #16202b;
+  --accent: #e07a3c;
+  --accent-fg: #ffffff;
+  --ok: #1f8a4c;
+  --warn: #c98100;
+  --bad: #c73a3a;
+  --ok-bg: #dff3e6;
+  --warn-bg: #fdf0d2;
+  --bad-bg: #fbe1e1;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151c; --surface: #18212b; --fg: #e6ecf2; --muted: #93a1b0; --line: #2a3644;
+    --floor: #1f4d70; --floor-zone: #a85428; --floor-line: #c9d6e2;
+    --slot-bg: rgba(15,21,28,.9); --slot-fg: #e6ecf2;
+    --accent: #f08a4b; --accent-fg: #14100c;
+    --ok: #4cc47f; --warn: #e8b13c; --bad: #ef6b6b;
+    --ok-bg: #173826; --warn-bg: #3a2d10; --bad-bg: #3d1a1a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151c; --surface: #18212b; --fg: #e6ecf2; --muted: #93a1b0; --line: #2a3644;
+  --floor: #1f4d70; --floor-zone: #a85428; --floor-line: #c9d6e2;
+  --slot-bg: rgba(15,21,28,.9); --slot-fg: #e6ecf2;
+  --accent: #f08a4b; --accent-fg: #14100c;
+  --ok: #4cc47f; --warn: #e8b13c; --bad: #ef6b6b;
+  --ok-bg: #173826; --warn-bg: #3a2d10; --bad-bg: #3d1a1a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 18px; }
+
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 2.1rem; letter-spacing: .01em; margin: 0; line-height: 1; text-transform: uppercase; }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 60ch; }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: 600 .95rem var(--display); letter-spacing: .06em; text-transform: uppercase; border: 0; padding: 8px 14px; background: transparent; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.seg button:disabled { cursor: not-allowed; opacity: .55; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 820px) { .main { grid-template-columns: minmax(0, 1fr); } }
+
+/* Court */
+.court-zone { background: var(--floor-zone); border-radius: 10px; padding: 14px; }
+.court { position: relative; background: var(--floor); border: 3px solid var(--floor-line); padding: 30px 10px 12px; }
+.net { position: absolute; left: -10px; right: -10px; top: -3px; height: 8px; background: repeating-linear-gradient(90deg, var(--floor-line) 0 3px, transparent 3px 8px); border-top: 3px solid var(--floor-line); }
+.net-label { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font: 600 .75rem var(--display); letter-spacing: .2em; color: var(--floor-line); opacity: .85; }
+.attack-line { height: 0; border-top: 2px solid var(--floor-line); opacity: .8; margin: 10px 0; }
+.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.row-label { font: 600 .7rem var(--display); letter-spacing: .18em; text-transform: uppercase; color: var(--floor-line); opacity: .8; margin: 0 0 6px 2px; }
+
+.slot { position: relative; min-height: 112px; background: var(--slot-bg); color: var(--slot-fg); border-radius: 8px; border: 3px solid transparent; padding: 8px 8px 8px; text-align: left; font: inherit; cursor: pointer; display: grid; align-content: start; gap: 2px; transition: transform .15s ease, border-color .15s ease; }
+.slot:focus-visible, button:focus-visible, .chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.slot.sel { transform: translateY(-3px); border-color: var(--accent) !important; }
+.slot.legal { border-color: var(--ok); }
+.slot.amber { border-color: var(--warn); }
+.slot.red { border-color: var(--bad); }
+.slot.empty { background: transparent; border-style: dashed; border-color: var(--floor-line); color: var(--floor-line); }
+.slot.flash { animation: flash .7s ease; }
+@keyframes flash { 0% { box-shadow: 0 0 0 0 var(--accent); } 40% { box-shadow: 0 0 0 6px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.pos { font: 700 .8rem var(--display); letter-spacing: .1em; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+.slot.empty .pos { color: var(--floor-line); }
+.num { font: 700 1.9rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.name { font-weight: 600; font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.role { font-size: .78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fit { justify-self: start; margin-top: 4px; font: 600 .78rem var(--display); letter-spacing: .05em; padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.fit.hi { background: var(--ok-bg); color: var(--ok); }
+.fit.mid { background: var(--warn-bg); color: var(--warn); }
+.fit.lo { background: var(--bad-bg); color: var(--bad); }
+.ball { width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff 0 30%, #f2c94c 31% 60%, #2f6f9e 61%); display: inline-block; }
+.libero-tag { font: 700 .65rem var(--display); letter-spacing: .1em; background: var(--accent); color: var(--accent-fg); border-radius: 4px; padding: 0 5px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--muted); margin-top: 10px; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 2px solid currentColor; }
+.legend .g { color: var(--ok); } .legend .a { color: var(--warn); } .legend .r { color: var(--bad); }
+
+/* Side panel */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 14px; min-width: 0; }
+.panel h2 { font: 700 1.05rem var(--display); letter-spacing: .1em; text-transform: uppercase; margin: 0; }
+.hint { color: var(--muted); font-size: .88rem; margin: 0; }
+.bench { display: flex; flex-wrap: wrap; gap: 8px; min-height: 44px; padding: 8px; border: 2px dashed var(--line); border-radius: 8px; cursor: pointer; }
+.bench.target { border-color: var(--accent); }
+.chip { font: inherit; display: inline-flex; gap: 6px; align-items: baseline; border: 2px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.chip b { font-family: var(--display); font-size: 1.05rem; }
+.chip.sel { border-color: var(--accent); }
+.issues { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.issues li { font-size: .88rem; padding: 6px 10px; border-radius: 6px; }
+.issues li.amber { background: var(--warn-bg); color: var(--warn); }
+.issues li.red { background: var(--bad-bg); color: var(--bad); }
+.issues li.ok { background: var(--ok-bg); color: var(--ok); }
+
+.btn { font: 700 1rem var(--display); letter-spacing: .08em; text-transform: uppercase; border: 0; border-radius: 8px; padding: 11px 16px; cursor: pointer; background: var(--fg); color: var(--bg); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); }
+.btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.btns .btn { flex: 1 1 140px; }
+
+.score { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--fg); color: var(--bg); border-radius: 8px; padding: 10px 14px; }
+.score .team { font: 600 .8rem var(--display); letter-spacing: .15em; text-transform: uppercase; opacity: .8; display: flex; gap: 6px; align-items: center; }
+.score .pts { font: 700 2.2rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.score .side { display: grid; gap: 2px; }
+.score .side:last-child { text-align: right; justify-items: end; }
+
+.log { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; display: grid; gap: 4px; font-size: .88rem; }
+.log li { padding: 5px 8px; border-left: 3px solid var(--line); }
+.log li.rot { border-color: var(--accent); }
+.log li.lib { border-color: var(--ok); }
+.log .t { font-family: var(--display); color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+footer { color: var(--muted); font-size: .82rem; max-width: 75ch; }
+@media (prefers-reduced-motion: reduce) { .slot, .slot.flash { transition: none; animation: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Rotation Lab</h1>
+      <p class="sub">Volleyball Career 26 · try the free-position rules: build a lineup, then play rallies and watch the rotation and libero swaps.</p>
+    </div>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Rule mode">
+        <button id="mode-sim" type="button">Simulation</button>
+        <button id="mode-arc" type="button">Arcade</button>
+      </div>
+      <div class="seg" role="group" aria-label="First serve">
+        <button id="serve-us" type="button">We serve</button>
+        <button id="serve-them" type="button">They serve</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="main">
+    <section>
+      <div class="court-zone">
+        <div class="court" id="court">
+          <div class="net"></div>
+          <div class="net-label">NET</div>
+          <p class="row-label">Front row</p>
+          <div class="row" id="front"></div>
+          <div class="attack-line" aria-hidden="true"></div>
+          <p class="row-label">Back row</p>
+          <div class="row" id="back"></div>
+        </div>
+      </div>
+      <div class="legend" id="legend">
+        <span class="g">Legal</span><span class="a">Arcade only</span><span class="r">Never allowed</span>
+      </div>
+    </section>
+
+    <aside class="panel" id="panel"></aside>
+  </div>
+
+  <footer>
+    Fit % compares each player's trained role with the job their starting slot carries in a 5-1 system (setter, outside, middle, opposite, outside, middle, counting P1→P6 from the setter). The values are first-pass balancing numbers. This page is a JavaScript copy of the rules in the game's C++ core, for demonstration.
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---- Data ------------------------------------------------------------------
+  const ROLE_NAME = { S: "Setter", OH: "Outside hitter", MB: "Middle blocker", OPP: "Opposite", L: "Libero" };
+  const FIT = {
+    S:   { S: 1.00, OH: 0.75, MB: 0.70, OPP: 0.80, L: 0.80 },
+    OH:  { S: 0.70, OH: 1.00, MB: 0.80, OPP: 0.90, L: 0.85 },
+    MB:  { S: 0.65, OH: 0.80, MB: 1.00, OPP: 0.80, L: 0.65 },
+    OPP: { S: 0.70, OH: 0.90, MB: 0.80, OPP: 1.00, L: 0.70 },
+    L:   { S: 0.75, OH: 0.60, MB: 0.60, OPP: 0.60, L: 1.00 },
+  };
+  const FIVE_ONE = ["S", "OH", "MB", "OPP", "OH", "MB"];
+  const SLOT = ["P1", "P2", "P3", "P4", "P5", "P6"];
+  const FRONT = [3, 2, 1]; // P4 P3 P2, left to right facing the net
+  const BACK = [4, 5, 0];  // P5 P6 P1
+  const isFront = (i) => i === 1 || i === 2 || i === 3;
+  const mod6 = (n) => ((n % 6) + 6) % 6;
+
+  // Example roster (fictional players).
+  const PLAYERS = [
+    { id: 1, num: 7,  name: "Rivas",     role: "S" },
+    { id: 2, num: 11, name: "Okafor",    role: "OH" },
+    { id: 3, num: 14, name: "Lindqvist", role: "MB" },
+    { id: 4, num: 9,  name: "Tanaka",    role: "OPP" },
+    { id: 5, num: 4,  name: "Moreau",    role: "OH" },
+    { id: 6, num: 16, name: "Petrov",    role: "MB" },
+    { id: 7, num: 1,  name: "Silva",     role: "L" },
+  ];
+  const P = Object.fromEntries(PLAYERS.map((p) => [p.id, p]));
+  const LIBERO_ID = 7;
+
+  const fit = (native, duty) => Math.min(1, Math.max(0.6, FIT[native][duty]));
+  const duty = (slot, setterSlot) => FIVE_ONE[mod6(slot - setterSlot)];
+
+  // ---- State -----------------------------------------------------------------
+  const state = {
+    mode: "sim",           // "sim" | "arc"
+    servingFirst: false,
+    phase: "setup",        // "setup" | "match"
+    setup: { slots: [1, 2, 3, 4, 5, 7], bench: [6] }, // libero starts at P6 for Petrov
+    sel: null,             // { kind: "slot", i } | { kind: "bench", id }
+    match: null,
+  };
+
+  // ---- Rules (mirrors core/src/RotationManager.cpp) -----------------------------
+  function specFromSetup() {
+    const slots = state.setup.slots.slice();
+    const liberoSlot = slots.indexOf(LIBERO_ID);
+    const starters = slots.slice();
+    let replacedId = null;
+    if (liberoSlot >= 0) {
+      replacedId = state.setup.bench.find((id) => id !== LIBERO_ID) ?? null;
+      starters[liberoSlot] = replacedId;
+    }
+    return { starters, liberoSlot: liberoSlot >= 0 ? liberoSlot : null, replacedId };
+  }
+
+  function validate(spec, servingFirst) {
+    const level = Array(6).fill("legal");
+    const issues = [];
+    const raise = (i, lv, reason) => {
+      const rank = { legal: 0, amber: 1, red: 2 };
+      if (rank[lv] > rank[level[i]]) level[i] = lv;
+      issues.push({ slot: i, level: lv, reason });
+    };
+    spec.starters.forEach((id, i) => {
+      if (id == null) {
+        raise(i, "red", spec.liberoSlot === i ? "The libero needs a benched player to replace." : "This slot is empty.");
+      }
+    });
+    if (spec.liberoSlot != null) {
+      const s = spec.liberoSlot;
+      if (isFront(s)) raise(s, "amber", "The libero may only replace back-row players.");
+      else if (s === 0 && servingFirst) raise(s, "amber", "The libero may not serve.");
+    }
+    const worst = level.includes("red") ? "red" : level.includes("amber") ? "amber" : "legal";
+    return { level, issues, worst };
+  }
+  const allowed = (report, mode) => (mode === "sim" ? report.worst === "legal" : report.worst !== "red");
+
+  function setterSlotOf(starters) {
+    const i = starters.findIndex((id) => id != null && P[id].role === "S");
+    return i >= 0 ? i : 0;
+  }
+
+  function createMatch() {
+    const spec = specFromSetup();
+    const setter = setterSlotOf(spec.starters);
+    const duties = {};
+    spec.starters.forEach((id, i) => { duties[id] = duty(i, setter); });
+    duties[LIBERO_ID] = state.mode === "arc" && spec.liberoSlot != null ? duty(spec.liberoSlot, setter) : "L";
+
+    const court = spec.starters.slice();
+    let replaced = null;
+    const targets = PLAYERS.filter((p) => p.role === "MB").map((p) => p.id);
+    if (spec.liberoSlot != null) {
+      replaced = spec.replacedId;
+      court[spec.liberoSlot] = LIBERO_ID;
+      if (!targets.includes(replaced)) targets.unshift(replaced);
+    }
+    return { court, serving: state.servingFirst, replaced, targets, duties, us: 0, them: 0, log: [], rally: 0, flash: [] };
+  }
+
+  function rotate(m) {
+    m.court = m.court.map((_, i) => m.court[mod6(i + 1)]); // P2→P1, …, P1→P6
+  }
+
+  function liberoRules(m) {
+    const ls = m.court.indexOf(LIBERO_ID);
+    if (ls >= 0) {
+      const mustLeave = isFront(ls) || (m.serving && ls === 0);
+      if (!mustLeave || m.replaced == null) return null;
+      const back = m.replaced;
+      m.court[ls] = back;
+      m.replaced = null;
+      return { slot: ls, other: back, entering: false };
+    }
+    for (const id of m.targets) {
+      const s = m.court.indexOf(id);
+      if (s < 0 || isFront(s) || (m.serving && s === 0)) continue;
+      m.replaced = id;
+      m.court[s] = LIBERO_ID;
+      return { slot: s, other: id, entering: true };
+    }
+    return null;
+  }
+
+  function rallyEnd(m, weWon) {
+    const out = { sideOut: false, swap: null };
+    m.rally += 1;
+    if (weWon) m.us += 1; else m.them += 1;
+    if (weWon && !m.serving) { rotate(m); m.serving = true; out.sideOut = true; }
+    else if (!weWon) m.serving = false;
+    if (state.mode === "sim") out.swap = liberoRules(m);
+    return out;
+  }
+
+  // ---- Rendering ---------------------------------------------------------------
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function fitBadge(id, dutyRole) {
+    const f = fit(P[id].role, dutyRole);
+    const cls = f >= 0.95 ? "hi" : f >= 0.75 ? "mid" : "lo";
+    return `<span class="fit ${cls}" title="Playing as ${ROLE_NAME[dutyRole]}">Fit ${Math.round(f * 100)}%</span>`;
+  }
+
+  function setupDuties() {
+    const spec = specFromSetup();
+    const setter = setterSlotOf(spec.starters);
+    const d = {};
+    spec.starters.forEach((id, i) => { if (id != null) d[id] = duty(i, setter); });
+    if (spec.liberoSlot != null) d[LIBERO_ID] = state.mode === "arc" ? duty(spec.liberoSlot, setter) : "L";
+    return d;
+  }
+
+  function slotHTML(i) {
+    const inMatch = state.phase === "match";
+    const m = state.match;
+    const id = inMatch ? m.court[i] : state.setup.slots[i];
+    let cls = "slot";
+    let extra = "";
+    if (!inMatch) {
+      const report = validate(specFromSetup(), state.servingFirst);
+      cls += " " + (report.level[i] === "legal" ? "legal" : report.level[i]);
+      if (state.sel && state.sel.kind === "slot" && state.sel.i === i) cls += " sel";
+    } else if (m.flash.includes(i)) {
+      cls += " flash";
+    }
+    const serveMark = inMatch && m.serving && i === 0 ? `<span class="ball" title="Serving"></span>` : "";
+    if (id == null) {
+      return `<button type="button" class="${cls} empty" data-slot="${i}" aria-label="${SLOT[i]} empty">
+        <span class="pos">${SLOT[i]}</span><span class="role">Empty. Tap a bench player, then here.</span></button>`;
+    }
+    const p = P[id];
+    const duties = inMatch ? m.duties : setupDuties();
+    const d = duties[id] ?? p.role;
+    const lib = id === LIBERO_ID ? `<span class="libero-tag">LIBERO</span>` : serveMark;
+    extra = fitBadge(id, d);
+    return `<button type="button" class="${cls}" data-slot="${i}" aria-label="${SLOT[i]}: ${esc(p.name)}">
+      <span class="pos">${SLOT[i]} ${lib}</span>
+      <span class="num">${p.num}</span>
+      <span class="name">${esc(p.name)}</span>
+      <span class="role">${ROLE_NAME[p.role]}${d !== p.role ? " → " + ROLE_NAME[d] : ""}</span>
+      ${extra}
+    </button>`;
+  }
+
+  function renderCourt() {
+    $("front").innerHTML = FRONT.map(slotHTML).join("");
+    $("back").innerHTML = BACK.map(slotHTML).join("");
+    $("legend").hidden = state.phase === "match";
+  }
+
+  function renderPanel() {
+    const panel = $("panel");
+    if (state.phase === "setup") {
+      const report = validate(specFromSetup(), state.servingFirst);
+      const ok = allowed(report, state.mode);
+      const benchSel = state.sel && state.sel.kind === "slot";
+      const items = report.issues.length
+        ? report.issues.map((x) => `<li class="${x.level}"><b>${SLOT[x.slot]}</b> · ${esc(x.reason)}</li>`).join("")
+        : `<li class="ok">Every slot is legal under FIVB rules.</li>`;
+      let blocked = "";
+      if (!ok) blocked = report.worst === "red"
+        ? "Fill every slot before starting."
+        : "Simulation doesn't allow amber placements. Switch to Arcade, or move the libero.";
+      panel.innerHTML = `
+        <h2>Lineup</h2>
+        <p class="hint">Tap a player, then another slot to swap them. Tap a player, then the bench to take them off court.</p>
+        <div>
+          <p class="hint" style="margin-bottom:6px">Bench</p>
+          <div class="bench ${benchSel ? "target" : ""}" id="bench" role="button" tabindex="0" aria-label="Bench">
+            ${state.setup.bench.map((id) => `<button type="button" class="chip ${state.sel && state.sel.kind === "bench" && state.sel.id === id ? "sel" : ""}" data-bench="${id}"><b>${P[id].num}</b> ${esc(P[id].name)} · ${P[id].role}</button>`).join("") || `<span class="hint">Empty</span>`}
+          </div>
+        </div>
+        <ul class="issues">${items}</ul>
+        <div class="btns">
+          <button type="button" class="btn primary" id="start" ${ok ? "" : "disabled"}>Start set</button>
+          <button type="button" class="btn ghost" id="reset-lineup">Standard 5-1</button>
+        </div>
+        ${blocked ? `<p class="hint">${blocked}</p>` : ""}
+        <p class="hint">Try: move libero Silva to P4 (amber), or tap “We serve” with Silva at P1.</p>`;
+    } else {
+      const m = state.match;
+      const benchIds = PLAYERS.map((p) => p.id).filter((id) => !m.court.includes(id));
+      panel.innerHTML = `
+        <div class="score">
+          <div class="side"><span class="team">${m.serving ? '<span class="ball"></span>' : ""}Us</span><span class="pts">${m.us}</span></div>
+          <div class="side"><span class="team">Them${!m.serving ? '<span class="ball"></span>' : ""}</span><span class="pts">${m.them}</span></div>
+        </div>
+        <div class="btns">
+          <button type="button" class="btn primary" id="win">We win the rally</button>
+          <button type="button" class="btn" id="lose">They win the rally</button>
+        </div>
+        <div class="btns">
+          <button type="button" class="btn ghost" id="auto">Play 10 random rallies</button>
+          <button type="button" class="btn ghost" id="back">Back to lineup</button>
+        </div>
+        <p class="hint">${state.mode === "sim" ? "Simulation: the libero swaps in and out automatically." : "Arcade: the libero stays in the rotation like any player."} Bench: ${benchIds.map((id) => esc(P[id].name)).join(", ") || "none"}.</p>
+        <div>
+          <h2 style="margin-bottom:8px">Rally log</h2>
+          <ul class="log">${m.log.map((e) => `<li class="${e.cls}"><span class="t">#${e.n}</span>${e.text}</li>`).join("") || `<li>No rallies yet. ${m.serving ? esc(P[m.court[0]].name) + " serves first." : "They serve first."}</li>`}</ul>
+        </div>`;
+    }
+  }
+
+  function renderToolbar() {
+    $("mode-sim").setAttribute("aria-pressed", state.mode === "sim");
+    $("mode-arc").setAttribute("aria-pressed", state.mode === "arc");
+    $("serve-us").setAttribute("aria-pressed", state.servingFirst);
+    $("serve-them").setAttribute("aria-pressed", !state.servingFirst);
+    const lock = state.phase === "match";
+    ["mode-sim", "mode-arc", "serve-us", "serve-them"].forEach((id) => { $(id).disabled = lock; });
+  }
+
+  function render() { renderToolbar(); renderCourt(); renderPanel(); }
+
+  // ---- Interaction -------------------------------------------------------------
+  function swapSetup(a, b) {
+    const s = state.setup;
+    if (a.kind === "slot" && b.kind === "slot") {
+      [s.slots[a.i], s.slots[b.i]] = [s.slots[b.i], s.slots[a.i]];
+    } else {
+      const slot = a.kind === "slot" ? a : b;
+      const bench = a.kind === "bench" ? a : b;
+      const out = s.slots[slot.i];
+      s.slots[slot.i] = bench.id;
+      s.bench = s.bench.filter((id) => id !== bench.id);
+      if (out != null) s.bench.push(out);
+    }
+  }
+
+  function playRally(weWon) {
+    const m = state.match;
+    const wasServing = m.serving;
+    const r = rallyEnd(m, weWon);
+    const n = m.rally;
+    const entries = [];
+    if (r.sideOut) entries.push({ n, cls: "rot", text: `Side-out. Rotate clockwise. ${esc(P[m.court[0]].name)} serves.` });
+    else if (weWon) entries.push({ n, cls: "", text: `Point on our serve. No rotation.` });
+    else entries.push({ n, cls: "", text: wasServing ? `They win the rally and take the serve.` : `They hold serve.` });
+    if (r.swap) {
+      entries.push(r.swap.entering
+        ? { n, cls: "lib", text: `Libero ${esc(P[LIBERO_ID].name)} in for ${esc(P[r.swap.other].name)} at ${SLOT[r.swap.slot]}.` }
+        : { n, cls: "lib", text: `${esc(P[LIBERO_ID].name)} reaches ${SLOT[r.swap.slot]} and must leave. ${esc(P[r.swap.other].name)} returns.` });
+    }
+    m.log = entries.reverse().concat(m.log).slice(0, 60);
+    m.flash = r.swap ? [r.swap.slot] : r.sideOut ? [0] : [];
+  }
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target.closest("button, #bench");
+    if (!t) return;
+    const id = t.id;
+    if (id === "mode-sim") { state.mode = "sim"; return render(); }
+    if (id === "mode-arc") { state.mode = "arc"; return render(); }
+    if (id === "serve-us") { state.servingFirst = true; return render(); }
+    if (id === "serve-them") { state.servingFirst = false; return render(); }
+
+    if (state.phase === "setup") {
+      if (id === "start") { state.match = createMatch(); state.phase = "match"; state.sel = null; return render(); }
+      if (id === "reset-lineup") { state.setup = { slots: [1, 2, 3, 4, 5, 7], bench: [6] }; state.sel = null; return render(); }
+      let pick = null;
+      if (t.dataset.slot != null) pick = { kind: "slot", i: +t.dataset.slot };
+      else if (t.dataset.bench != null) pick = { kind: "bench", id: +t.dataset.bench };
+      else if (id === "bench") pick = { kind: "benchzone" };
+      if (!pick) return;
+
+      const sel = state.sel;
+      if (pick.kind === "benchzone") {
+        if (sel && sel.kind === "slot" && state.setup.slots[sel.i] != null) {
+          state.setup.bench.push(state.setup.slots[sel.i]);
+          state.setup.slots[sel.i] = null;
+        }
+        state.sel = null;
+      } else if (!sel) {
+        if (pick.kind === "slot" && state.setup.slots[pick.i] == null) return; // nothing to pick up
+        state.sel = pick;
+      } else if (sel.kind === pick.kind && (sel.i === pick.i && sel.id === pick.id)) {
+        state.sel = null;
+      } else if (sel.kind === "bench" && pick.kind === "bench") {
+        state.sel = pick;
+      } else {
+        swapSetup(sel, pick);
+        state.sel = null;
+      }
+      return render();
+    }
+
+    if (id === "win") { playRally(true); return render(); }
+    if (id === "lose") { playRally(false); return render(); }
+    if (id === "auto") { for (let k = 0; k < 10; k++) playRally(Math.random() < 0.5); state.match.flash = []; return render(); }
+    if (id === "back") { state.phase = "setup"; state.match = null; return render(); }
+  });
+
+  document.addEventListener("keydown", (ev) => {
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target.id === "bench") { ev.preventDefault(); ev.target.click(); }
+  });
+
+  render();
+})();
+</script>
