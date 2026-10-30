@@ -9,6 +9,7 @@ Mobile 3rd-person volleyball sim for Android. The full design is in [docs/GDD.md
 | `docs/GDD.md` | Technical & game design document |
 | `core/` | Engine-agnostic C++17 gameplay rules: Rotation Manager, libero automation, overlap checks, Role-Fit for 5-1 / 6-2 / 4-2 (GDD 1.7), set and match scoring for indoor and beach |
 | `tests/` | Unit tests for `core/` (no third-party dependencies), run by CI on every push |
+| `game/` | Unreal Engine 5 project. The `VC26Core` plugin brings `core/` in with Blueprint nodes. Setup: [docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md) |
 | `docs/demo/rotation-lab.html` | Interactive browser demo of the free-position rules. Open the file in any browser |
 
 `core/` has no engine dependencies and is deterministic, so the same code can be compiled into a UE5 module, a Unity native plugin, or the authoritative ranked server.

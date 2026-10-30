@@ -1,0 +1,11 @@
+# Unreal generated / local files
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.sln
+*.xcworkspace
+.vscode/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/

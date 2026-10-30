@@ -1,0 +1,16 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "VC26 Core",
+	"Description": "Engine-agnostic volleyball rules (rotation, libero, Role-Fit, scoring) from the repository's core/ folder, with Blueprint access.",
+	"Category": "Gameplay",
+	"CanContainContent": false,
+	"Modules": [
+		{
+			"Name": "VC26Core",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

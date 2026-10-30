@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"Category": "Game",
+	"Description": "Volleyball Career 26 - mobile 3rd-person volleyball sim",
+	"Modules": [
+		{
+			"Name": "VolleyballCareer26",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": ["Engine", "VC26Core"]
+		}
+	],
+	"Plugins": [
+		{ "Name": "VC26Core", "Enabled": true },
+		{ "Name": "PoseSearch", "Enabled": true },
+		{ "Name": "AnimationWarping", "Enabled": true }
+	],
+	"TargetPlatforms": ["Android", "Windows", "Mac", "Linux"]
+}
