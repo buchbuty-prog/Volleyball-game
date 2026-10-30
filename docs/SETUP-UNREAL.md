@@ -32,6 +32,14 @@ If the rebuild fails, open `VolleyballCareer26.sln` in Visual Studio, build the 
 In the editor, create any Blueprint actor, add the **VC26 Team** and **VC26 Match** components, and look under the *VC26* category in the node menu:
 *Validate Lineup*, *Start Set*, *Rally End*, *Get Role Fit*, *Award Point*, and the *On Side Out*, *On Libero Swap*, *On Match Point* events.
 
+## 3b. Play the first court
+
+1. *File → New Level → Basic → Create* (a flat floor with lighting), then *Ctrl+S* and save it as `Court`.
+2. Press the green **Play** button. The court, both teams and a broadcast camera appear.
+3. Click inside the game view, then use **1** (home wins the rally), **2** (away wins the rally) and **R** (restart).
+   Players walk to their new slots on each side-out, the yellow liberos swap in and out, and the score, set
+   and match-point messages show in the top left.
+
 ## 4. Android (when you're ready to run on a phone)
 
 1. Install **Android Studio** from <https://developer.android.com/studio>. Use the version Epic lists for your engine on the page below. Open it once, then close it.
