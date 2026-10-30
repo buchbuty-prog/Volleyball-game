@@ -36,7 +36,7 @@ In the editor, create any Blueprint actor, add the **VC26 Team** and **VC26 Matc
 
 1. *File → New Level → Basic → Create* (a flat floor with lighting), then *Ctrl+S* and save it as `Court`.
 2. Press the green **Play** button. The court, both teams and a broadcast camera appear.
-3. Click inside the game view, then use **1** (home wins the rally), **2** (away wins the rally) and **R** (restart).
+3. Click inside the game view. On your serve, aim the green circle with the arrow keys, hold **Space** to charge the power bar and release near the sweet spot. The away team serves by itself. **1** / **2** give a rally to home / away and **R** restarts.
    Players walk to their new slots on each side-out, the yellow liberos swap in and out, and the score, set
    and match-point messages show in the top left.
 

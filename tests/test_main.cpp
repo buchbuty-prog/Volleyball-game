@@ -4,6 +4,7 @@
 #include <functional>
 #include <vector>
 
+#include "vc26/Ball.h"
 #include "vc26/MatchScore.h"
 #include "vc26/RoleFit.h"
 #include "vc26/RotationManager.h"
@@ -313,6 +314,62 @@ TEST(beach_best_of_three_switches_every_seven) {
     score(m, Team::Home, 20);
     CHECK(m.isMatchPoint());
     CHECK(m.awardPoint(Team::Home).matchWon);
+}
+
+// --- Ball & serve -----------------------------------------------------------
+
+namespace {
+bool near(double a, double b, double tol = 1.0) { return std::fabs(a - b) <= tol; }
+const Vec3 kHomeHand{-980.0, 300.0, 250.0};
+}  // namespace
+
+TEST(arc_reaches_target_and_apex) {
+    const Vec3 to{500.0, -200.0, 10.5};
+    const Trajectory tr = solveArc(kHomeHand, to, 450.0);
+    const double t = *tr.timeDownAt(10.5);
+    const Vec3 end = tr.at(t);
+    CHECK(near(end.x, to.x) && near(end.y, to.y) && near(end.z, to.z));
+    const double tApex = tr.velocity.z / tr.gravity;
+    CHECK(near(tr.at(tApex).z, 450.0));
+}
+
+TEST(sweet_spot_serve_lands_on_target) {
+    const Vec3 target{600.0, -150.0, 0.0};
+    const ServePlan s = planServe(kHomeHand, target, kServeSweetSpot);
+    CHECK(s.outcome == ServeOutcome::In);
+    CHECK(near(s.landing.x, target.x, 2.0) && near(s.landing.y, target.y, 2.0));
+    CHECK(s.flightTime > 0.5 && s.flightTime < 3.0);
+}
+
+TEST(weak_serve_hits_net) {
+    // Just short of the sweet spot clips the tape...
+    const ServePlan clip = planServe(kHomeHand, Vec3{500.0, 0.0, 0.0}, 0.5);
+    CHECK(clip.outcome == ServeOutcome::Net);
+    CHECK(near(clip.landing.x, 0.0));
+    // ...and a very weak one never reaches the net.
+    const ServePlan s = planServe(kHomeHand, Vec3{300.0, 0.0, 0.0}, 0.2);
+    CHECK(s.outcome == ServeOutcome::Net);
+    CHECK(s.landing.x < 0.0);
+}
+
+TEST(strong_deep_serve_goes_long) {
+    const ServePlan s = planServe(kHomeHand, Vec3{820.0, 0.0, 0.0}, 1.0);
+    CHECK(s.outcome == ServeOutcome::Out);
+    CHECK(s.landing.x > 900.0);
+}
+
+TEST(wide_target_is_out) {
+    const ServePlan s = planServe(kHomeHand, Vec3{500.0, 520.0, 0.0}, kServeSweetSpot);
+    CHECK(s.outcome == ServeOutcome::Out);
+}
+
+TEST(away_serve_mirrors) {
+    const Vec3 hand{980.0, -300.0, 250.0};
+    const ServePlan s = planServe(hand, Vec3{-600.0, 100.0, 0.0}, kServeSweetSpot);
+    CHECK(s.outcome == ServeOutcome::In);
+    CHECK(s.landing.x < 0.0);
+    CHECK(landsInOpponentCourt(Vec3{-900.0, 450.0, 0.0}, false));   // line ball is in
+    CHECK(!landsInOpponentCourt(Vec3{-920.0, 0.0, 0.0}, false));
 }
 
 int main() {

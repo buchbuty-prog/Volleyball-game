@@ -1,12 +1,14 @@
 // First playable slice: a regulation court built from engine shapes, both
-// teams standing in their rotation slots, and keys to play rallies.
-//   1 = home wins the rally, 2 = away wins the rally, R = restart the match.
+// teams standing in their rotation slots, and the serve.
+//   Home serve: arrow keys aim, hold Space to charge power, release to serve.
+//   Away serves automatically. 1 / 2 = give the rally to home / away, R = restart.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "VC26MatchComponent.h"
 #include "VC26Types.h"
+#include "vc26/Ball.h"
 
 #include "VC26CourtActor.generated.h"
 
@@ -58,13 +60,20 @@ private:
 		UStaticMeshComponent* Body = nullptr;
 		UStaticMeshComponent* Head = nullptr;
 		UTextRenderComponent* Label = nullptr;
+		UTextRenderComponent* SubLabel = nullptr;
 		FVector Target = FVector::ZeroVector;
 	};
 
 	void BuildCourt();
 	void BuildTeam(bool bHome);
 	void StartMatch();
-	void PlayRally(bool bHomeWins);
+	void PlayRally(bool bHomeWins, const FString& Reason);
+	void BeginServe();
+	void LaunchServe(const FVector& Target, float InPower);
+	void ResolveServe();
+	void TickServe(APlayerController* PC, float DeltaSeconds);
+	FVector ServerHand() const;
+	FString PowerBar() const;
 	void UpdateTargets(bool bSnap);
 	FVector SlotPosition(bool bHome, EVC26Slot Slot, bool bServing) const;
 	FVector BenchPosition(bool bHome, int32 BenchIndex) const;
@@ -111,4 +120,19 @@ private:
 
 	TArray<FPlayerVisual> Players;
 	FString LastEvent;
+
+	enum class EServePhase : uint8 { Aiming, Charging, InFlight, PointOver };
+	EServePhase Phase = EServePhase::Aiming;
+	float PhaseTime = 0.f;
+	bool bHomeServing = false;
+	FVector2D Aim = FVector2D(500.f, 0.f); // home serve target on the away court
+	float Power = 0.f;
+	float PowerDirection = 1.f;
+	vc26::ServePlan Serve;
+	bool bPendingPointHome = false;
+	FString PendingReason;
+	FRandomStream Rng;
+
+	UStaticMeshComponent* Ball = nullptr;
+	UStaticMeshComponent* Reticle = nullptr;
 };

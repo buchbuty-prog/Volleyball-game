@@ -194,6 +194,9 @@ void AVC26CourtActor::BuildCourt()
 	}
 	AddShape(CubeMesh, FVector(0, 0, NetTop - 50.f), FVector(2.f, CourtWidth + 200.f, 100.f), NetColor);
 	AddShape(CubeMesh, FVector(0, 0, NetTop - 3.f), FVector(3.f, CourtWidth + 200.f, 7.f), Line);
+
+	Ball = AddShape(SphereMesh, FVector::ZeroVector, FVector(21.f), FLinearColor(1.f, 0.85f, 0.1f));
+	Reticle = AddShape(CylinderMesh, FVector::ZeroVector, FVector(90.f, 90.f, 1.f), FLinearColor(0.2f, 1.f, 0.6f));
 }
 
 void AVC26CourtActor::BuildTeam(bool bHome)
@@ -216,9 +219,17 @@ void AVC26CourtActor::BuildTeam(bool bHome)
 		V.Label->SetupAttachment(RootComponent);
 		V.Label->RegisterComponent();
 		V.Label->SetHorizontalAlignment(EHTA_Center);
-		V.Label->SetWorldSize(32.f);
+		V.Label->SetWorldSize(26.f);
 		V.Label->SetTextRenderColor(FColor::White);
 		SpawnedComponents.Add(V.Label);
+
+		V.SubLabel = NewObject<UTextRenderComponent>(this);
+		V.SubLabel->SetupAttachment(RootComponent);
+		V.SubLabel->RegisterComponent();
+		V.SubLabel->SetHorizontalAlignment(EHTA_Center);
+		V.SubLabel->SetWorldSize(20.f);
+		V.SubLabel->SetTextRenderColor(FColor(255, 230, 120));
+		SpawnedComponents.Add(V.SubLabel);
 
 		Players.Add(V);
 	}
@@ -230,18 +241,21 @@ void AVC26CourtActor::StartMatch()
 	HomeTeam->StartSet(MakeLineup(true), Mode, bHomeServesFirst);
 	AwayTeam->StartSet(MakeLineup(false), Mode, !bHomeServesFirst);
 	LastEvent = FString::Printf(TEXT("New match. %s serves first."), bHomeServesFirst ? TEXT("Home") : TEXT("Away"));
+	Rng.Initialize(26);
 	UpdateTargets(true);
+	BeginServe();
 }
 
-void AVC26CourtActor::PlayRally(bool bHomeWins)
+void AVC26CourtActor::PlayRally(bool bHomeWins, const FString& Reason)
 {
 	if (Match->IsFinished())
 	{
 		return;
 	}
 	const bool bHomeWasServing = HomeTeam->IsServing();
-	LastEvent = bHomeWins ? (bHomeWasServing ? TEXT("Home point on serve.") : TEXT("Home side-out: home rotates."))
-	                      : (bHomeWasServing ? TEXT("Away side-out: away rotates.") : TEXT("Away point on serve."));
+	LastEvent = Reason + TEXT("  ");
+	LastEvent += bHomeWins ? (bHomeWasServing ? TEXT("Home point on serve.") : TEXT("Home side-out: home rotates."))
+	                       : (bHomeWasServing ? TEXT("Away side-out: away rotates.") : TEXT("Away point on serve."));
 
 	HomeTeam->RallyEnd(bHomeWins);
 	AwayTeam->RallyEnd(!bHomeWins);
@@ -272,17 +286,16 @@ void AVC26CourtActor::UpdateTargets(bool bSnap)
 		const bool bOnCourt = Team->GetSlotOf(V.Id, Slot);
 		V.Target = bOnCourt ? SlotPosition(V.bHome, Slot, Team->IsServing()) : BenchPosition(V.bHome, Bench[V.bHome ? 0 : 1]++);
 
-		FString Text = FString::Printf(TEXT("%d %s"), V.Number, *V.Name);
+		V.Label->SetText(FText::FromString(FString::Printf(TEXT("%d %s"), V.Number, *V.Name)));
 		if (bOnCourt)
 		{
 			const int32 Fit = FMath::RoundToInt(Team->GetRoleFit(V.Id) * 100.f);
-			Text += FString::Printf(TEXT(" | %s | Fit %d%%"), SlotNames[static_cast<int32>(Slot)], Fit);
+			V.SubLabel->SetText(FText::FromString(FString::Printf(TEXT("%s  Fit %d%%"), SlotNames[static_cast<int32>(Slot)], Fit)));
 		}
 		else
 		{
-			Text += TEXT(" | bench");
+			V.SubLabel->SetText(FText::FromString(TEXT("bench")));
 		}
-		V.Label->SetText(FText::FromString(Text));
 
 		if (bSnap)
 		{
@@ -303,19 +316,22 @@ void AVC26CourtActor::Tick(float DeltaSeconds)
 			PC->bAutoManageActiveCameraTarget = false;
 			PC->SetViewTarget(Camera);
 		}
-		if (PC->WasInputKeyJustPressed(EKeys::One))
-		{
-			PlayRally(true);
-		}
-		else if (PC->WasInputKeyJustPressed(EKeys::Two))
-		{
-			PlayRally(false);
-		}
-		else if (PC->WasInputKeyJustPressed(EKeys::R))
+		if (PC->WasInputKeyJustPressed(EKeys::R))
 		{
 			StartMatch();
 		}
+		else if (Phase == EServePhase::Aiming && !Match->IsFinished() &&
+		         (PC->WasInputKeyJustPressed(EKeys::One) || PC->WasInputKeyJustPressed(EKeys::Two)))
+		{
+			const bool bHome = PC->WasInputKeyJustPressed(EKeys::One);
+			PlayRally(bHome, bHome ? TEXT("Rally given to home.") : TEXT("Rally given to away."));
+			if (!Match->IsFinished())
+			{
+				BeginServe();
+			}
+		}
 	}
+	TickServe(PC, DeltaSeconds);
 
 	const FVector CamWorld = Camera ? Camera->GetActorLocation() : FVector::ZeroVector;
 	for (FPlayerVisual& V : Players)
@@ -324,13 +340,15 @@ void AVC26CourtActor::Tick(float DeltaSeconds)
 		const FVector Next = FMath::VInterpTo(Current, V.Target + FVector(0, 0, 87.f), DeltaSeconds, 3.f);
 		V.Body->SetRelativeLocation(Next);
 		V.Head->SetRelativeLocation(Next + FVector(0, 0, 100.f));
-		V.Label->SetRelativeLocation(Next + FVector(0, 0, 140.f));
+		V.Label->SetRelativeLocation(Next + FVector(0, 0, 160.f));
+		V.SubLabel->SetRelativeLocation(Next + FVector(0, 0, 134.f));
 		if (Camera)
 		{
 			// Keep names readable from the broadcast camera.
 			FRotator Face = (CamWorld - V.Label->GetComponentLocation()).Rotation();
 			Face.Pitch = 0.f;
 			V.Label->SetWorldRotation(Face);
+			V.SubLabel->SetWorldRotation(Face);
 		}
 	}
 
@@ -343,8 +361,14 @@ void AVC26CourtActor::Tick(float DeltaSeconds)
 				HomePts, Match->GetSets(EVC26Team::Home), AwayPts, Match->GetSets(EVC26Team::Away),
 				Match->GetSetNumber(), HomeTeam->IsServing() ? TEXT("HOME") : TEXT("AWAY")));
 		GEngine->AddOnScreenDebugMessage(2, 0.f, FColor::Yellow, LastEvent);
+		const bool bHomeAiming = bHomeServing && (Phase == EServePhase::Aiming || Phase == EServePhase::Charging);
 		GEngine->AddOnScreenDebugMessage(3, 0.f, FColor(180, 180, 180),
-			TEXT("Keys: 1 = home wins rally   2 = away wins rally   R = restart   (click the game view first)"));
+			bHomeAiming ? TEXT("Your serve: arrow keys aim the green circle, hold SPACE for power, release to serve.   R = restart")
+			            : TEXT("1 / 2 = give the rally to home / away (between serves)   R = restart   (click the game view first)"));
+		if (bHomeAiming)
+		{
+			GEngine->AddOnScreenDebugMessage(4, 0.f, FColor::Green, PowerBar());
+		}
 	}
 }
 
@@ -401,4 +425,188 @@ void AVC26CourtActor::HandleMatchPoint(EVC26Team Team)
 void AVC26CourtActor::HandleSwitchSides()
 {
 	LastEvent += TEXT("  Teams switch sides.");
+}
+
+// ---------------------------------------------------------------------------
+// Serve
+// ---------------------------------------------------------------------------
+
+namespace
+{
+vc26::Vec3 ToCore(const FVector& V)
+{
+	return {V.X, V.Y, V.Z};
+}
+}  // namespace
+
+FVector AVC26CourtActor::ServerHand() const
+{
+	// Ball held at shoulder height, just to the server's right.
+	const FVector Feet = SlotPosition(bHomeServing, EVC26Slot::P1, true);
+	return Feet + FVector(0.f, bHomeServing ? 35.f : -35.f, 240.f);
+}
+
+void AVC26CourtActor::BeginServe()
+{
+	bHomeServing = HomeTeam->IsServing();
+	Phase = EServePhase::Aiming;
+	PhaseTime = 0.f;
+	Power = 0.f;
+	PowerDirection = 1.f;
+	Ball->SetRelativeLocation(ServerHand());
+}
+
+void AVC26CourtActor::LaunchServe(const FVector& Target, float InPower)
+{
+	Serve = vc26::planServe(ToCore(ServerHand()), ToCore(Target), InPower);
+	Phase = EServePhase::InFlight;
+	PhaseTime = 0.f;
+
+	if (bHomeServing)
+	{
+		const float Miss = FMath::Abs(InPower - static_cast<float>(vc26::kServeSweetSpot));
+		LastEvent = Miss < 0.04f ? TEXT("Perfect power!") : (InPower < vc26::kServeSweetSpot ? TEXT("A bit soft...") : TEXT("A bit hard..."));
+	}
+	else
+	{
+		LastEvent = TEXT("Away serves...");
+	}
+}
+
+void AVC26CourtActor::ResolveServe()
+{
+	const TCHAR* Server = bHomeServing ? TEXT("Home") : TEXT("Away");
+	switch (Serve.outcome)
+	{
+		case vc26::ServeOutcome::Net:
+			bPendingPointHome = !bHomeServing;
+			PendingReason = FString::Printf(TEXT("%s serve into the net."), Server);
+			break;
+		case vc26::ServeOutcome::Out:
+			bPendingPointHome = !bHomeServing;
+			PendingReason = FString::Printf(TEXT("%s serve lands out."), Server);
+			break;
+		case vc26::ServeOutcome::In:
+		{
+			// Serves near the lines are harder to pass. The rally itself is
+			// simulated until passing and attacking are playable.
+			const vc26::CourtGeometry Court;
+			const double ToLine = FMath::Min(Court.halfWidth - FMath::Abs(Serve.landing.y), Court.halfLength - FMath::Abs(Serve.landing.x));
+			const float Closeness = FMath::Clamp(1.f - static_cast<float>(ToLine) / 200.f, 0.f, 1.f);
+			if (Rng.FRand() < 0.15f + 0.4f * Closeness)
+			{
+				bPendingPointHome = bHomeServing;
+				PendingReason = FString::Printf(TEXT("ACE by %s!"), Server);
+			}
+			else
+			{
+				bPendingPointHome = Rng.FRand() < 0.5f;
+				PendingReason = FString::Printf(TEXT("Serve in. Rally won by %s."), bPendingPointHome ? TEXT("home") : TEXT("away"));
+			}
+			break;
+		}
+	}
+	LastEvent = PendingReason;
+}
+
+void AVC26CourtActor::TickServe(APlayerController* PC, float DeltaSeconds)
+{
+	PhaseTime += DeltaSeconds;
+	const bool bShowReticle = bHomeServing && (Phase == EServePhase::Aiming || Phase == EServePhase::Charging);
+	Reticle->SetVisibility(bShowReticle);
+	if (bShowReticle)
+	{
+		Reticle->SetRelativeLocation(FVector(Aim.X, Aim.Y, 4.f));
+	}
+
+	switch (Phase)
+	{
+		case EServePhase::Aiming:
+			Ball->SetRelativeLocation(ServerHand());
+			if (Match->IsFinished())
+			{
+				break;
+			}
+			if (bHomeServing && PC)
+			{
+				const double Step = 450.0 * DeltaSeconds;
+				if (PC->IsInputKeyDown(EKeys::Up)) Aim.X += Step;
+				if (PC->IsInputKeyDown(EKeys::Down)) Aim.X -= Step;
+				if (PC->IsInputKeyDown(EKeys::Right)) Aim.Y += Step;
+				if (PC->IsInputKeyDown(EKeys::Left)) Aim.Y -= Step;
+				Aim.X = FMath::Clamp(Aim.X, 60.0, 880.0);
+				Aim.Y = FMath::Clamp(Aim.Y, -440.0, 440.0);
+				if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
+				{
+					Phase = EServePhase::Charging;
+					Power = 0.f;
+					PowerDirection = 1.f;
+				}
+			}
+			else if (!bHomeServing && PhaseTime > 1.5f)
+			{
+				const FVector Target(Rng.FRandRange(-850.f, -150.f), Rng.FRandRange(-400.f, 400.f), 0.f);
+				LaunchServe(Target, Rng.FRandRange(0.6f, 0.95f));
+			}
+			break;
+
+		case EServePhase::Charging:
+			Ball->SetRelativeLocation(ServerHand());
+			// The gauge sweeps up and back down while Space is held.
+			Power += PowerDirection * DeltaSeconds / 1.1f;
+			if (Power >= 1.f)
+			{
+				Power = 1.f;
+				PowerDirection = -1.f;
+			}
+			else if (Power <= 0.f)
+			{
+				Power = 0.f;
+				PowerDirection = 1.f;
+			}
+			if (PC && PC->WasInputKeyJustReleased(EKeys::SpaceBar))
+			{
+				LaunchServe(FVector(Aim.X, Aim.Y, 0.f), Power);
+			}
+			break;
+
+		case EServePhase::InFlight:
+		{
+			const double T = FMath::Min(static_cast<double>(PhaseTime), Serve.flightTime);
+			const vc26::Vec3 P = Serve.flight.at(T);
+			Ball->SetRelativeLocation(FVector(P.x, P.y, P.z));
+			if (PhaseTime >= Serve.flightTime)
+			{
+				ResolveServe();
+				Phase = EServePhase::PointOver;
+				PhaseTime = 0.f;
+			}
+			break;
+		}
+
+		case EServePhase::PointOver:
+			if (!Match->IsFinished() && PhaseTime > 2.f)
+			{
+				PlayRally(bPendingPointHome, PendingReason);
+				if (!Match->IsFinished())
+				{
+					BeginServe();
+				}
+			}
+			break;
+	}
+}
+
+FString AVC26CourtActor::PowerBar() const
+{
+	const int32 Cells = 30;
+	FString Bar;
+	for (int32 i = 0; i < Cells; ++i)
+	{
+		const float V = (i + 0.5f) / Cells;
+		const bool bFilled = V <= Power;
+		const bool bSweet = FMath::Abs(V - static_cast<float>(vc26::kServeSweetSpot)) < 0.04f;
+		Bar.AppendChar(bFilled ? (bSweet ? TEXT('#') : TEXT('|')) : (bSweet ? TEXT(':') : TEXT('.')));
+	}
+	return FString::Printf(TEXT("POWER [%s] %d%%    sweet spot = the # / : marks"), *Bar, FMath::RoundToInt(Power * 100.f));
 }
