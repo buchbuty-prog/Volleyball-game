@@ -834,6 +834,57 @@ TEST(set_point_is_flagged_and_speeds_the_gauge) {
     CHECK(saw);
 }
 
+// --- Team play --------------------------------------------------------------
+
+TEST(the_libero_swaps_in_and_never_serves_or_plays_front_row) {
+    RallySim::Config c;
+    c.seed = 13;
+    c.humanHome = false;
+    RallySim sim(c);
+    bool sawLibero = false, sawMiddleBack = false;
+    for (long i = 0; i < 2000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+        sim.step(kDt, {});
+        sim.takeEvents();
+        int liberos = 0;
+        for (int p = 0; p < 6; ++p) {
+            liberos += sim.players()[p].id == 7;
+            sawMiddleBack = sawMiddleBack || sim.players()[p].id == 6;
+        }
+        sawLibero = sawLibero || liberos == 1;
+        CHECK(liberos <= 1);
+        if (sim.phase() == RallyPhase::PreServe) CHECK(sim.players()[sim.server()].id != 7);
+    }
+    CHECK(sawLibero && sawMiddleBack);  // both on and off the court during the match
+}
+
+TEST(setter_plays_follow_the_stick) {
+    auto setHeight = [](float forward) {
+        RallySim::Config c;
+        c.seed = 3;
+        RallySim sim(c);
+        ScriptedHuman player;
+        float peak = 0.f;
+        int free = 0;
+        bool inSet = false;
+        for (long i = 0; i < 2000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+            SimInput in = player(sim);
+            if (sim.pending().active && sim.pending().team == Team::Home && sim.pending().touch == 2) in.moveX = forward;
+            sim.step(kDt, in);
+            for (const SimEvent& e : sim.takeEvents()) {
+                if (e.type != SimEvent::Type::Contact) continue;
+                inSet = e.kind == ContactKind::Set && e.team == Team::Home;
+                free += e.kind == ContactKind::FreeBall && e.team == Team::Home;
+            }
+            if (inSet) peak = std::max(peak, sim.ball().pos.z);
+        }
+        return std::make_pair(peak, free);
+    };
+    const auto high = setHeight(0.f), quick = setHeight(1.f), dump = setHeight(-1.f);
+    CHECK(high.first > 4.3f);
+    CHECK(quick.first > 0.f && quick.first < 3.9f);
+    CHECK(dump.second > high.second);
+}
+
 // --- Career -----------------------------------------------------------------
 
 namespace {

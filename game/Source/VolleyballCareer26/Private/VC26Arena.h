@@ -102,6 +102,7 @@ private:
 		EPose Swing = EPose::Idle;  // held briefly after touching the ball
 		float SwingLeft = 0.f;
 		FVector DiveDirection = FVector::ForwardVector;
+		int32 ShownId = -1;
 	};
 
 	// Flow (VC26Arena.cpp).

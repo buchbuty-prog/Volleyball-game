@@ -40,7 +40,7 @@ VC26CORE_API bool inCleanReach(Vec3 feet, Vec3 point);
 
 struct SimInput {
     float moveX = 0.f;    // towards the opponent, -1..1
-    float moveY = 0.f;    // towards Home's left, -1..1
+    float moveY = 0.f;    // towards Home's left, -1..1. On a set, forward is a quick and back a dump
     bool action = false;  // held state of the action button
 };
 
@@ -86,6 +86,7 @@ struct BlockAttempt {
     bool active = false;
     Team team = Team::Home;
     int player = -1;            // index into players()
+    int partner = -1;           // the neighbour who closes the double block
     float timeToContact = 0.f;  // until the hitter strikes the ball
     float pressLead = 0.f;      // the ideal jump comes this long before that
     Vec3 attackPoint;
@@ -161,6 +162,8 @@ private:
     void endRally(Team winner, PointReason reason);
 
     int serverIndex() const;
+    int indexOfPlayer(Team team, int id) const;
+    void applyLiberoSwap(Team team, const std::optional<LiberoSwap>& swap);
     int chooseReceiver(Team team, int touch, Vec3 point, bool spikeable) const;
     Vec3 basePosition(int player) const;
     Vec3 formationPosition(int player) const;
@@ -207,6 +210,7 @@ private:
     bool outsideAntenna_ = false;
     float sinceContact_ = 0.f;
     bool stretching_ = false;
+    bool quickSet_ = false;  // the set in the air is a quick, which beats the block to the spot
     int rallyContacts_ = 0;
     int controlled_ = 0;
 

@@ -21,6 +21,7 @@ namespace
 	const FLinearColor HomeShorts(0.9f, 0.9f, 0.92f);
 	const FLinearColor AwayJersey(0.72f, 0.06f, 0.06f);
 	const FLinearColor AwayShorts(0.05f, 0.05f, 0.06f);
+	const FLinearColor LiberoJersey(0.95f, 0.7f, 0.05f);
 	const FLinearColor ShoeColor(0.85f, 0.85f, 0.85f);
 	const FLinearColor SkinTones[] = {
 		FLinearColor(0.82f, 0.56f, 0.42f), FLinearColor(0.55f, 0.33f, 0.2f), FLinearColor(0.25f, 0.14f, 0.08f), FLinearColor(0.9f, 0.68f, 0.54f)};
@@ -411,7 +412,7 @@ void AVC26Arena::BuildLights()
 AVC26Arena::EPose AVC26Arena::PoseFor(int32 Player) const
 {
 	const vc26::BlockAttempt& Block = Sim->block();
-	if (Block.active && Block.player == Player && (Block.committed || Block.timeToContact < 0.6f))
+	if (Block.active && (Block.player == Player || Block.partner == Player) && (Block.committed || Block.timeToContact < 0.6f))
 	{
 		return EPose::Block;
 	}
@@ -456,6 +457,18 @@ void AVC26Arena::PlaceBone(int32 Part, const FVector& From, const FVector& To, f
 void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 {
 	FFigure& Figure = Figures[Player];
+	const int32 PlayerId = Sim->players()[Player].id;
+	if (PlayerId != Figure.ShownId)
+	{
+		// The libero is the same body in a contrasting jersey.
+		Figure.ShownId = PlayerId;
+		const FLinearColor Jersey = PlayerId == 7 ? LiberoJersey : Player < 6 ? HomeJersey : AwayJersey;
+		for (const int32 Part : {Torso, UpperArmL, UpperArmR})
+		{
+			Parts[Player * PartCount + Part]->SetMaterial(0, ColorMaterial(Jersey));
+		}
+		Numbers[Player]->SetText(FText::AsNumber(PlayerId));
+	}
 	FVector Feet = SimToWorld(Sim->players()[Player].pos);
 	const FVector Up = FVector::UpVector;
 	const float S = Figure.Height;

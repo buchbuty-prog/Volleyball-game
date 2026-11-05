@@ -417,7 +417,7 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 	if (Sim.phase() == vc26::RallyPhase::InPlay && Pending.active && Pending.team == Team::Home)
 	{
 		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: tap as the rings meet") : TEXT("PASS: steer to the ring, SPACE as the rings meet"))
-			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb picks the side, tap as the rings meet") : TEXT("SET: A / D picks the side, SPACE as the rings meet"))
+			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb calls the play, tap as the rings meet") : TEXT("SET: A / D outside, W quick, S dump. SPACE as the rings meet"))
 			: Pending.spike ? (bTouch ? TEXT("ATTACK: left thumb aims, tap to jump as the rings meet") : TEXT("ATTACK: WASD aims, SPACE to jump as the rings meet"))
 			: (bTouch ? TEXT("Tap as the rings meet to play it over") : TEXT("SPACE as the rings meet to play it over"));
 		DrawCentred(Prompt, 985.f, FLinearColor::White, 1.1f);

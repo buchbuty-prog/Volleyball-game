@@ -43,7 +43,9 @@ constexpr float kTakeoffBack = 0.5f;
 constexpr float kApproachSpeed = 6.8f;
 constexpr float kMissedJumpGrace = 0.2f; // a hitter who never jumped can still bump it over
 
-constexpr float kBlockReach = 0.5f;    // either side of the blocker
+constexpr float kBlockReach = 0.33f;   // either side of the blocker
+constexpr float kPartnerGap = 0.75f;   // the second blocker closes this far from the first
+constexpr int kLiberoId = 7;
 constexpr float kBlockTop = kNetHeight + 0.6f;
 constexpr float kBlockerDepth = 0.35f;  // from the net
 constexpr float kBlockJumpHeight = 0.7f;
@@ -132,12 +134,17 @@ RallySim::RallySim(const Config& config)
     LineupSpec spec;
     spec.starters = {Player{1, Role::Setter},   Player{2, Role::OutsideHitter}, Player{3, Role::MiddleBlocker},
                      Player{4, Role::Opposite}, Player{5, Role::OutsideHitter}, Player{6, Role::MiddleBlocker}};
+    spec.libero = Player{kLiberoId, Role::Libero};
+    spec.liberoStartSlot = Slot::P6;
+    spec.liberoTargets = {3, 6};  // both middles
     rotation_[0] = RotationManager::create(spec, RuleMode::Simulation, true);
     rotation_[1] = RotationManager::create(spec, RuleMode::Simulation, false);
 
     for (int i = 0; i < 12; ++i) {
         players_[i].team = i < 6 ? Team::Home : Team::Away;
         players_[i].id = i % 6 + 1;
+        // The libero starts on court in place of the player in P6.
+        if (players_[i].id == 6) players_[i].id = kLiberoId;
     }
     for (int i = 0; i < 12; ++i) players_[i].pos = basePosition(i);
     startRally();
@@ -186,8 +193,23 @@ float RallySim::serveGauge() const {
 }
 
 int RallySim::serverIndex() const {
-    const int team = static_cast<int>(serving_);
-    return team * 6 + rotation_[team]->at(Slot::P1).id - 1;
+    return indexOfPlayer(serving_, rotation_[static_cast<int>(serving_)]->at(Slot::P1).id);
+}
+
+int RallySim::indexOfPlayer(Team team, int id) const {
+    const int first = static_cast<int>(team) * 6;
+    for (int i = first; i < first + 6; ++i) {
+        if (players_[i].id == id) return i;
+    }
+    return first;
+}
+
+// One body on the court, so a swap just changes who it is.
+void RallySim::applyLiberoSwap(Team team, const std::optional<LiberoSwap>& swap) {
+    if (!swap) return;
+    const int leaving = swap->entering ? swap->otherId : swap->liberoId;
+    const int arriving = swap->entering ? swap->liberoId : swap->otherId;
+    players_[indexOfPlayer(team, leaving)].id = arriving;
 }
 
 Vec3 RallySim::basePosition(int player) const {
@@ -234,7 +256,7 @@ void RallySim::startRally() {
     serving_ = rotation_[0]->serving() ? Team::Home : Team::Away;
     lastTeam_ = serving_;
     lastKind_ = ContactKind::Serve;
-    controlled_ = serving_ == Team::Home ? serverIndex() : rotation_[0]->at(Slot::P6).id - 1;
+    controlled_ = serving_ == Team::Home ? serverIndex() : indexOfPlayer(Team::Home, rotation_[0]->at(Slot::P6).id);
 }
 
 void RallySim::step(float dt, const SimInput& input) {
@@ -332,6 +354,7 @@ void RallySim::serveAt(Vec3 target, float netMargin) {
 }
 
 void RallySim::launch(Team team, int player, ContactKind kind, ContactQuality quality, Vec3 velocity) {
+    if (kind != ContactKind::Set) quickSet_ = false;
     if (kind == ContactKind::Block) {
         touches_ = 0;  // a block is not one of the team's three touches
     } else {
@@ -444,8 +467,18 @@ void RallySim::startBlock(Team team, Vec3 attackPoint, float timeToContact) {
     block_.timeToContact = timeToContact;
     block_.pressLead = kBlockLead;
     block_.attackPoint = attackPoint;
-    block_.shade = (rand01() * 2.f - 1.f) * 0.8f;
+    block_.shade = (rand01() * 2.f - 1.f) * (quickSet_ ? 1.8f : 0.8f);
     if (isHumanTeam(team)) controlled_ = best;
+
+    float nearest = 1e9f;
+    for (int i = first; i < first + 6; ++i) {
+        if (i == best || !isFrontRow(*rm.slotOf(players_[i].id))) continue;
+        const float gap = std::fabs(players_[i].pos.y - players_[best].pos.y);
+        if (gap < nearest) {
+            nearest = gap;
+            block_.partner = i;
+        }
+    }
 }
 
 bool RallySim::updateBlock(float dt, bool pressed) {
@@ -470,7 +503,13 @@ bool RallySim::updateBlock(float dt, bool pressed) {
                              : r < 0.3f + 0.4f * config_.cpuSkill ? ContactQuality::Good
                                                                   : ContactQuality::Shank;
         }
-        if (block_.committed) jump(players_[block_.player], kBlockJumpHeight);
+        if (block_.committed) {
+            jump(players_[block_.player], kBlockJumpHeight);
+            // The neighbour only goes up if they got there.
+            if (block_.partner >= 0 && std::fabs(players_[block_.partner].pos.y - players_[block_.player].pos.y) < kPartnerGap + 0.5f) {
+                jump(players_[block_.partner], kBlockJumpHeight);
+            }
+        }
     }
     if (block_.timeToContact < -0.5f) block_.active = false;  // the attack never came
     return usedPress;
@@ -484,7 +523,10 @@ void RallySim::resolveBlock(Vec3 crossing) {
     const BlockAttempt attempt = block_;
     block_.active = false;
     if (!attempt.committed || lastKind_ != ContactKind::Attack) return;
-    if (std::fabs(crossing.y - players_[attempt.player].pos.y) > blockReach(attempt.team) || crossing.z > kBlockTop) return;
+    const SimPlayer* partner = attempt.partner >= 0 && players_[attempt.partner].pos.z > 0.f ? &players_[attempt.partner] : nullptr;
+    float gap = std::fabs(crossing.y - players_[attempt.player].pos.y);
+    if (partner) gap = std::min(gap, std::fabs(crossing.y - partner->pos.y));
+    if (gap > blockReach(attempt.team) || crossing.z > kBlockTop) return;
 
     const float own = sideSign(attempt.team);
     if (attempt.quality == ContactQuality::Shank) {
@@ -513,7 +555,7 @@ ContactQuality RallySim::cpuQuality() {
     const float hard = pending_.touch == 1 ? std::clamp((speed - 10.f) / 8.f, 0.f, 1.f) : 0.f;
     const float zone = inZone(pending_.team) ? 1.25f : 1.f;
     const float perfect = (0.25f + 0.45f * config_.cpuSkill) * (1.f - 0.7f * hard) * zone;
-    const float serveBonus = lastKind_ == ContactKind::Serve ? 0.38f : 0.f;
+    const float serveBonus = lastKind_ == ContactKind::Serve ? 0.48f : 0.f;
     const float shank = (0.25f - 0.2f * config_.cpuSkill + 0.35f * hard + serveBonus) / zone;
     const float r = rand01();
     if (r < perfect) return ContactQuality::Perfect;
@@ -528,7 +570,9 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     const Vec3 from = ball_.pos;
 
     if (contact.touch == 1) {
-        const float accuracy = 1.f - 0.45f * skillBoost(team, Skill::Pass);
+        // Liberos are passing specialists on either team.
+        const float specialist = players_[contact.player].id == kLiberoId ? 0.75f : 1.f;
+        const float accuracy = (1.f - 0.45f * skillBoost(team, Skill::Pass)) * specialist;
         const Vec3 target = Vec3{own * 1.5f, 0.f, kSetHeight} + scatter(errorRadius(quality, 0.2f, 1.f, 3.2f) * accuracy);
         const float apex = quality == ContactQuality::Shank ? 3.f + rand01() * 2.5f : 4.3f;
         launch(team, contact.player, ContactKind::Pass, quality, launchVelocity(from, target, flightTimeForApex(from, target, apex)));
@@ -538,9 +582,22 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     if (contact.touch == 2) {
         float across = (static_cast<int>(rand01() * 3.f) - 1) * 3.2f;
         if (human) across = std::fabs(aim.moveY) > 0.3f ? (aim.moveY > 0.f ? 3.2f : -3.2f) : 0.f;
+        const float call = rand01();  // what the CPU setter calls
+        const bool quick = human ? aim.moveX > 0.5f : call < 0.2f;
+        const bool dump = human ? aim.moveX < -0.5f : call > 0.95f;
+
+        if (dump) {
+            // Tipped over the net while the block is watching the hitters.
+            const Vec3 target{-own * (1.5f + rand01() * 2.f), std::clamp(from.y + aim.moveY * 2.5f, -4.f, 4.f), kBallRadius};
+            launch(team, contact.player, ContactKind::FreeBall, quality, launchVelocity(from, target, flightTimeForApex(from, target, 3.3f)));
+            return;
+        }
+
         const float accuracy = 1.f - 0.45f * skillBoost(team, Skill::Set);
+        if (quick) across = std::clamp(from.y + leftSign(team), -3.f, 3.f);
+        quickSet_ = quick;
         const Vec3 target = Vec3{own * 1.f, across, kAttackHeight} + scatter(errorRadius(quality, 0.1f, 0.5f, 1.8f) * accuracy);
-        launch(team, contact.player, ContactKind::Set, quality, launchVelocity(from, target, flightTimeForApex(from, target, 4.6f)));
+        launch(team, contact.player, ContactKind::Set, quality, launchVelocity(from, target, flightTimeForApex(from, target, quick ? 3.6f : 4.6f)));
         return;
     }
 
@@ -693,8 +750,8 @@ void RallySim::endRally(Team winner, PointReason reason) {
     pointWinner_ = winner;
     const bool clutch = score_.setPointFor().has_value();
     const PointResult result = score_.awardPoint(winner);
-    rotation_[0]->onRallyEnd(winner == Team::Home);
-    rotation_[1]->onRallyEnd(winner == Team::Away);
+    applyLiberoSwap(Team::Home, rotation_[0]->onRallyEnd(winner == Team::Home).liberoSwap);
+    applyLiberoSwap(Team::Away, rotation_[1]->onRallyEnd(winner == Team::Away).liberoSwap);
 
     SimEvent e;
     e.type = SimEvent::Type::Point;
@@ -718,8 +775,17 @@ void RallySim::movePlayers(float dt, const SimInput& input) {
             const bool chosen = live && pending_.active && pending_.player == i;
             const bool server = phase_ == RallyPhase::PreServe && i == serverIndex();
             const bool blocking = block_.active && block_.player == i;
+            const bool closing = block_.active && block_.partner == i;
 
-            if (blocking) {
+            if (closing) {
+                if (block_.committed) {
+                    accelerate(p, 0.f, 0.f, rate, dt);
+                } else {
+                    const float mate = players_[block_.player].pos.y;
+                    const float y = mate + (p.pos.y > mate ? kPartnerGap : -kPartnerGap);
+                    steer(p, Vec3{own * kBlockerDepth, y, 0.f}, kPlayerSpeed, kHumanAcceleration, dt);
+                }
+            } else if (blocking) {
                 float y = p.pos.y;
                 if (block_.committed) {
                     accelerate(p, 0.f, 0.f, rate, dt);
