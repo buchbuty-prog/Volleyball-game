@@ -1,10 +1,13 @@
 // Minimal self-contained test runner (no third-party dependencies).
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
 
+#include "vc26/Ball.h"
 #include "vc26/MatchScore.h"
+#include "vc26/RallySim.h"
 #include "vc26/RoleFit.h"
 #include "vc26/RotationManager.h"
 
@@ -313,6 +316,398 @@ TEST(beach_best_of_three_switches_every_seven) {
     score(m, Team::Home, 20);
     CHECK(m.isMatchPoint());
     CHECK(m.awardPoint(Team::Home).matchWon);
+}
+
+// --- Ball physics -----------------------------------------------------------
+
+namespace {
+constexpr float kDt = 1.f / 120.f;
+bool near(float a, float b, float tol) { return std::fabs(a - b) <= tol; }
+}  // namespace
+
+TEST(ball_lands_where_predicted) {
+    Ball b{{-8.f, 1.f, 2.5f}, {9.f, -1.f, 6.f}};
+    const Vec3 predicted = positionAfter(b, timeToHeight(b, kBallRadius));
+    BallStep s;
+    for (int i = 0; i < 2000 && !s.landed; ++i) s = stepBall(b, kDt);
+    CHECK(s.landed);
+    CHECK(near(b.pos.x, predicted.x, 0.01f) && near(b.pos.y, predicted.y, 0.01f));
+}
+
+TEST(launch_velocity_reaches_target_on_time) {
+    const Vec3 from{-1.f, 0.f, 3.f}, to{6.f, 2.f, kBallRadius};
+    Ball b{from, launchVelocity(from, to, 0.6f)};
+    const Vec3 p = positionAfter(b, 0.6f);
+    CHECK(near(p.x, to.x, 0.001f) && near(p.y, to.y, 0.001f) && near(p.z, to.z, 0.001f));
+}
+
+TEST(apex_flight_peaks_at_the_requested_height) {
+    const Vec3 from{-6.f, 0.f, 0.9f}, to{-1.5f, 0.f, 2.4f};
+    const float t = flightTimeForApex(from, to, 4.3f);
+    Ball b{from, launchVelocity(from, to, t)};
+    CHECK(near(from.z + b.vel.z * b.vel.z / (2.f * kGravity), 4.3f, 0.01f));
+    CHECK(near(positionAfter(b, t).z, to.z, 0.001f));
+}
+
+TEST(clearing_flight_time_passes_over_and_into_the_net) {
+    const Vec3 from{-9.7f, 0.f, 2.6f}, to{3.f, 0.f, kBallRadius};
+    Ball over{from, launchVelocity(from, to, flightTimeClearingNet(from, to, 0.2f))};
+    BallStep s;
+    bool hit = false;
+    for (int i = 0; i < 2000 && !s.landed; ++i) {
+        s = stepBall(over, kDt);
+        hit = hit || s.hitNet;
+    }
+    CHECK(!hit && over.pos.x > 0.f);
+
+    Ball into{from, launchVelocity(from, to, flightTimeClearingNet(from, to, -0.6f))};
+    s = {};
+    hit = false;
+    for (int i = 0; i < 2000 && !s.landed; ++i) {
+        s = stepBall(into, kDt);
+        hit = hit || s.hitNet;
+    }
+    CHECK(hit && into.pos.x < 0.f);  // stays on the hitter's side
+}
+
+TEST(ball_past_the_antenna_is_flagged) {
+    Ball b{{-1.f, 5.f, 3.f}, {10.f, 0.f, 0.f}};
+    bool outside = false;
+    for (int i = 0; i < 60; ++i) outside = stepBall(b, kDt).crossedOutsideAntenna || outside;
+    CHECK(outside);
+}
+
+TEST(line_balls_are_in) {
+    CHECK(isInCourt({9.f, 4.5f, 0.f}));
+    CHECK(isInCourt({9.1f, 0.f, 0.f}));
+    CHECK(!isInCourt({9.2f, 0.f, 0.f}));
+    CHECK(!isInCourt({0.f, 4.7f, 0.f}));
+}
+
+// --- Rally simulation -------------------------------------------------------
+
+TEST(timing_windows_grade_early_and_late_alike) {
+    CHECK(gradeTiming(0.f) == ContactQuality::Perfect);
+    CHECK(gradeTiming(-0.05f) == ContactQuality::Perfect);
+    CHECK(gradeTiming(0.1f) == ContactQuality::Good);
+    CHECK(gradeTiming(-0.2f) == ContactQuality::Shank);
+    CHECK(!gradeTiming(0.4f));
+}
+
+namespace {
+
+struct MatchStats {
+    int points = 0, contacts = 0, longest = 0, aces = 0, kills = 0, faults = 0, homeWins = 0;
+    std::vector<int> log;
+};
+
+// Plays until the match ends or `maxPoints` rallies have finished.
+template <typename Driver>
+MatchStats playMatch(RallySim& sim, Driver driver, int maxPoints = 100000) {
+    MatchStats st;
+    for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver && st.points < maxPoints; ++i) {
+        const int contacts = sim.contactsThisRally();
+        sim.step(kDt, driver(sim));
+        for (const SimEvent& e : sim.takeEvents()) {
+            if (e.type != SimEvent::Type::Point) continue;
+            ++st.points;
+            st.contacts += contacts;
+            st.longest = std::max(st.longest, contacts);
+            st.homeWins += e.team == Team::Home;
+            st.aces += e.reason == PointReason::Ace;
+            st.kills += e.reason == PointReason::Kill;
+            st.faults += e.reason == PointReason::Out || e.reason == PointReason::BallDown || e.reason == PointReason::Antenna;
+            st.log.push_back(static_cast<int>(e.team) * 10 + static_cast<int>(e.reason));
+        }
+    }
+    return st;
+}
+
+SimInput noInput(const RallySim&) { return {}; }
+
+// Stands in for a skilled player: runs to the ball, presses on the beat.
+struct ScriptedHuman {
+    float pressAt = 0.f;  // timeToContact at which to press
+    bool held = false;
+    float reaction = 0.f;  // seconds before it starts running to a new ball
+    float waited = 0.f;
+    Vec3 lastPoint;
+    SimInput operator()(const RallySim& sim) {
+        SimInput in;
+        const Vec3 point = sim.pending().point;
+        waited = point.x == lastPoint.x && point.y == lastPoint.y ? waited + kDt : 0.f;
+        lastPoint = point;
+        if (sim.humanServing()) {
+            if (!sim.serveCharging()) {
+                held = !held;
+                in.action = held;
+            } else {
+                in.action = sim.serveGauge() < 0.7f;
+                held = in.action;
+            }
+            return in;
+        }
+        const PendingContact& p = sim.pending();
+        if (p.active && p.team == Team::Home) {
+            const Vec3 me = sim.players()[p.player].pos;
+            const float dx = p.point.x - me.x, dy = p.point.y - me.y, d = std::hypot(dx, dy);
+            if (d > 0.1f && p.touch == 1 && waited >= reaction) {
+                in.moveX = dx / d;
+                in.moveY = dy / d;
+            }
+            in.action = p.timeToContact <= pressAt && !held;
+            held = in.action;
+        } else {
+            held = false;
+        }
+        return in;
+    }
+};
+
+}  // namespace
+
+TEST(cpu_matches_finish_with_a_legal_result) {
+    MatchStats total;
+    for (std::uint32_t seed = 1; seed <= 30; ++seed) {
+        RallySim::Config c;
+        c.seed = seed;
+        c.humanHome = false;
+        RallySim sim(c);
+        const MatchStats st = playMatch(sim, noInput);
+        CHECK(sim.phase() == RallyPhase::MatchOver);
+        CHECK(sim.score().finished());
+        const Team w = *sim.score().winner();
+        CHECK(sim.score().sets(w) == 3 && sim.score().sets(other(w)) < 3);
+        total.points += st.points;
+        total.contacts += st.contacts;
+        total.longest = std::max(total.longest, st.longest);
+        total.aces += st.aces;
+        total.kills += st.kills;
+        total.faults += st.faults;
+        total.homeWins += st.homeWins;
+    }
+    const float avg = static_cast<float>(total.contacts) / static_cast<float>(total.points);
+    std::printf("  %d rallies: %.2f contacts avg, longest %d, aces %d, kills %d, faults %d, home won %d\n", total.points,
+                static_cast<double>(avg), total.longest, total.aces, total.kills, total.faults, total.homeWins);
+    CHECK(avg >= 3.5f && avg <= 12.f);  // real rallies, not serve-and-done
+    CHECK(total.longest >= 8);
+    CHECK(total.aces < total.points / 5);
+    CHECK(total.kills > total.points / 4);
+    const float homeShare = static_cast<float>(total.homeWins) / static_cast<float>(total.points);
+    CHECK(homeShare > 0.45f && homeShare < 0.55f);  // same skill, no side advantage
+}
+
+TEST(same_seed_replays_the_same_match) {
+    RallySim::Config c;
+    c.seed = 42;
+    c.humanHome = false;
+    RallySim a(c), b(c);
+    CHECK(playMatch(a, noInput).log == playMatch(b, noInput).log);
+    c.seed = 43;
+    RallySim d(c);
+    RallySim e(RallySim::Config{MatchRules::indoor(), 42, false, 0.7f});
+    CHECK(playMatch(d, noInput).log != playMatch(e, noInput).log);
+}
+
+TEST(idle_human_gives_the_points_away) {
+    RallySim::Config c;
+    c.seed = 7;
+    RallySim sim(c);
+    // Serves when it has to, then never touches the ball.
+    bool held = false;
+    const MatchStats st = playMatch(sim, [&held](const RallySim& s) {
+        SimInput in;
+        if (s.humanServing()) {
+            held = !held;
+            in.action = held;
+        }
+        return in;
+    }, 200);
+    CHECK(sim.score().winner() == Team::Away);
+    CHECK(st.homeWins * 5 < st.points);  // only CPU serving errors
+}
+
+TEST(well_timed_human_beats_the_cpu) {
+    int won = 0;
+    for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+        RallySim::Config c;
+        c.seed = seed;
+        RallySim sim(c);
+        const MatchStats st = playMatch(sim, ScriptedHuman{});
+        CHECK(sim.phase() == RallyPhase::MatchOver);
+        CHECK(st.longest >= 5);
+        won += sim.score().winner() == Team::Home;
+    }
+    std::printf("  scripted human won %d of 10\n", won);
+    CHECK(won >= 7);
+}
+
+TEST(late_human_plays_worse_than_on_time_human) {
+    int onTime = 0, late = 0, onPoints = 0, latePoints = 0;
+    for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+        RallySim::Config c;
+        c.seed = seed;
+        RallySim good(c), bad(c);
+        const MatchStats g = playMatch(good, ScriptedHuman{0.f}, 150);
+        const MatchStats b = playMatch(bad, ScriptedHuman{-0.25f}, 150);
+        onTime += g.homeWins;
+        onPoints += g.points;
+        late += b.homeWins;
+        latePoints += b.points;
+    }
+    CHECK(static_cast<float>(onTime) / static_cast<float>(onPoints) >
+          static_cast<float>(late) / static_cast<float>(latePoints) + 0.1f);
+}
+
+TEST(cpu_blocks_some_attacks_and_serves_score_aces) {
+    int attacks = 0, blocks = 0, blockPoints = 0, netTouches = 0, aces = 0, points = 0;
+    for (std::uint32_t seed = 1; seed <= 30; ++seed) {
+        RallySim::Config c;
+        c.seed = seed;
+        c.humanHome = false;
+        RallySim sim(c);
+        for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+            sim.step(kDt, {});
+            for (const SimEvent& e : sim.takeEvents()) {
+                attacks += e.type == SimEvent::Type::Contact && e.kind == ContactKind::Attack;
+                blocks += e.type == SimEvent::Type::Contact && e.kind == ContactKind::Block;
+                if (e.type != SimEvent::Type::Point) continue;
+                ++points;
+                aces += e.reason == PointReason::Ace;
+                blockPoints += e.reason == PointReason::Block;
+                netTouches += e.reason == PointReason::NetTouch;
+            }
+        }
+    }
+    std::printf("  %d attacks, %d blocks, %d block points, %d net touches, %d aces in %d points\n", attacks, blocks,
+                blockPoints, netTouches, aces, points);
+    CHECK(blocks > attacks / 20 && blocks < attacks / 3);
+    CHECK(blockPoints > 0 && blockPoints < blocks);
+    CHECK(netTouches > 0 && netTouches < blocks);
+    CHECK(aces > points / 50 && aces < points / 6);
+}
+
+TEST(a_block_is_not_one_of_the_three_touches) {
+    int checked = 0;
+    for (std::uint32_t seed = 1; seed <= 5; ++seed) {
+        RallySim::Config c;
+        c.seed = seed;
+        c.humanHome = false;
+        RallySim sim(c);
+        for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+            sim.step(kDt, {});
+            for (const SimEvent& e : sim.takeEvents()) {
+                if (e.type != SimEvent::Type::Contact || e.kind != ContactKind::Block || !sim.pending().active) continue;
+                CHECK(sim.pending().touch == 1);
+                ++checked;
+            }
+        }
+    }
+    CHECK(checked > 0);
+}
+
+namespace {
+
+// Passes, sets and attacks like ScriptedHuman, and also blocks at `blockAt`.
+struct ScriptedBlocker {
+    ScriptedHuman play;
+    float blockAt = 0.f;
+    SimInput operator()(const RallySim& sim) {
+        if (!sim.humanBlocking()) return play(sim);
+        const BlockAttempt& b = sim.block();
+        SimInput in;
+        const float gap = b.attackPoint.y - sim.players()[b.player].pos.y;
+        if (std::fabs(gap) > 0.05f) in.moveY = gap > 0.f ? 1.f : -1.f;
+        in.action = b.timeToContact <= blockAt;
+        return in;
+    }
+};
+
+int humanBlocks(float blockAt, ContactQuality wanted) {
+    int count = 0;
+    for (std::uint32_t seed = 1; seed <= 5; ++seed) {
+        RallySim::Config c;
+        c.seed = seed;
+        RallySim sim(c);
+        ScriptedBlocker driver{ScriptedHuman{}, blockAt};
+        for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+            sim.step(kDt, driver(sim));
+            for (const SimEvent& e : sim.takeEvents()) {
+                count += e.type == SimEvent::Type::Contact && e.kind == ContactKind::Block && e.team == Team::Home &&
+                         e.quality == wanted;
+            }
+        }
+    }
+    return count;
+}
+
+}  // namespace
+
+TEST(higher_cpu_skill_is_harder_to_beat) {
+    auto homeShare = [](float skill) {
+        int won = 0, points = 0;
+        for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+            RallySim::Config c;
+            c.seed = seed;
+            c.cpuSkill = skill;
+            RallySim sim(c);
+            ScriptedHuman player;  // human-like: slightly off, and slow off the mark
+            player.pressAt = 0.1f;
+            player.reaction = 0.35f;
+            const MatchStats st = playMatch(sim, player, 150);
+            won += st.homeWins;
+            points += st.points;
+        }
+        return static_cast<float>(won) / static_cast<float>(points);
+    };
+    const float easy = homeShare(0.35f), normal = homeShare(0.7f), hard = homeShare(1.f);
+    std::printf("  average-timed human wins %.0f%% easy, %.0f%% normal, %.0f%% hard\n", static_cast<double>(easy * 100.f),
+                static_cast<double>(normal * 100.f), static_cast<double>(hard * 100.f));
+    CHECK(easy > normal + 0.03f);
+    CHECK(normal > hard + 0.03f);
+}
+
+TEST(being_late_hurts_but_stays_playable) {
+    auto homeShare = [](float pressAt) {
+        int won = 0, points = 0;
+        for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+            RallySim::Config c;
+            c.seed = seed;
+            RallySim sim(c);
+            const MatchStats st = playMatch(sim, ScriptedHuman{pressAt}, 150);
+            won += st.homeWins;
+            points += st.points;
+        }
+        return static_cast<float>(won) / static_cast<float>(points);
+    };
+    const float early = homeShare(0.1f), late = homeShare(-0.1f);
+    std::printf("  0.1 s early wins %.0f%% of points, 0.1 s late wins %.0f%%\n", static_cast<double>(early * 100.f),
+                static_cast<double>(late * 100.f));
+    CHECK(late > 0.5f);  // a Good-window press must not be a disguised miss
+    CHECK(early > late);
+}
+
+TEST(dead_ball_bounces_and_comes_to_rest_on_the_floor) {
+    RallySim::Config c;
+    c.humanHome = false;
+    RallySim sim(c);
+    float peak = 0.f;
+    bool sawPointOver = false;
+    for (int i = 0; i < 200000 && !(sawPointOver && sim.phase() == RallyPhase::PreServe); ++i) {
+        sim.step(kDt, {});
+        if (sim.phase() != RallyPhase::PointOver) continue;
+        sawPointOver = true;
+        peak = std::max(peak, sim.ball().pos.z);
+        CHECK(sim.ball().pos.z >= kBallRadius);
+    }
+    CHECK(sawPointOver && peak > 0.2f);
+}
+
+TEST(human_block_quality_follows_the_timing) {
+    CHECK(humanBlocks(0.f, ContactQuality::Perfect) > 0);
+    CHECK(humanBlocks(0.f, ContactQuality::Good) == 0);
+    CHECK(humanBlocks(0.1f, ContactQuality::Good) > 0);
+    CHECK(humanBlocks(0.1f, ContactQuality::Perfect) == 0);
 }
 
 int main() {

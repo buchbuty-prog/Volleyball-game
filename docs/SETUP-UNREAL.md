@@ -32,7 +32,11 @@ If the rebuild fails, open `VolleyballCareer26.sln` in Visual Studio, build the 
 In the editor, create any Blueprint actor, add the **VC26 Team** and **VC26 Match** components, and look under the *VC26* category in the node menu:
 *Validate Lineup*, *Start Set*, *Rally End*, *Get Role Fit*, *Award Point*, and the *On Side Out*, *On Libero Swap*, *On Match Point* events.
 
-## 4. Android (when you're ready to run on a phone)
+## 4. Play
+
+Run `game/Play.bat`, or press **Play** in the editor. The arena is built at runtime on the engine's empty map, so there are no levels to open. Run `Play.bat -VC26Autoplay` to watch the CPU play both sides.
+
+## 5. Android (when you're ready to run on a phone)
 
 1. Install **Android Studio** from <https://developer.android.com/studio>. Use the version Epic lists for your engine on the page below. Open it once, then close it.
 2. Run the engine's setup script. For a launcher install it's
@@ -48,5 +52,5 @@ Exact SDK, NDK and Android Studio versions change with each engine release. Epic
 |---|---|
 | `core/` | The volleyball rules in plain C++. Shared with the unit tests and the future ranked server |
 | `game/Plugins/VC26Core/` | Compiles `core/` into Unreal and adds the Blueprint nodes |
-| `game/Source/VolleyballCareer26/` | The game module, where gameplay code goes |
+| `game/Source/VolleyballCareer26/` | The game module: draws `RallySim`, reads input and shows the HUD. Rules and gameplay belong in `core/` |
 | `game/Config/` | Mobile renderer, Android package and landscape settings |

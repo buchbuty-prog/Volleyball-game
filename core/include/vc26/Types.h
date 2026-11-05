@@ -1,6 +1,6 @@
 // Volleyball Career 26 - engine-agnostic gameplay core.
-// Plain C++17, no engine headers, no RNG: identical inputs give identical
-// results, so the same code can run on the client and the ranked server.
+// Plain C++17, no engine headers, no unseeded randomness: identical inputs give
+// identical results, so the same code can run on the client and the ranked server.
 #pragma once
 
 #include <array>

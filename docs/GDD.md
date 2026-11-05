@@ -78,6 +78,9 @@ This is the system that lets a player select **any court position** (not just th
 | 5-1 / 6-2 / 4-2 duties | `systemDuty()`, `LineupSpec::system` |
 | Set/match scoring, match-point cam and VO triggers | `MatchScore` (`MatchRules::indoor()` / `beach()`), `PointResult` events |
 | Playable rules demo | `docs/demo/rotation-lab.html` |
+| Ball flight, shadow reticle, in/out calls | `stepBall()`, `timeToHeight()`, `isInCourt()` in `Ball.h` |
+| Perfect / Good / Shank timing, full 6v6 rally with CPU players | `gradeTiming()`, `RallySim` |
+| Solo block: roof / touch / net-touch risk (double and triple not yet) | `BlockAttempt`, `RallySim::resolveBlock()` |
 
 ---
 
