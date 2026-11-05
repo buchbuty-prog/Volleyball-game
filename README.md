@@ -16,7 +16,9 @@ Mobile 3rd-person volleyball sim for Android. The full design is in [docs/GDD.md
 
 ## Play the prototype
 
-Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run `game/Play.bat`. Everyone is a placeholder shape for now.
+Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run `game/Play.bat`.
+
+Rigged athletes come from Mixamo files, which stay out of git because the license doesn't allow sharing them. Put the downloads in `game/Content/Mixamo` and run `game/Tools/ImportAthletes.bat`. Without them the game uses its shape-built players.
 
 | Input | Action |
 |---|---|

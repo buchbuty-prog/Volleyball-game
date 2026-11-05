@@ -10,3 +10,7 @@ DerivedDataCache/
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
 Build/
+# Mixamo downloads stay local: the license doesn't allow sharing the raw files.
+# Without them the game falls back to its shape-built players.
+Content/Mixamo/
+Content/Athlete/

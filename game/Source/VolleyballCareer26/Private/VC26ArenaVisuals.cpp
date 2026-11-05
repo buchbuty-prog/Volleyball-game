@@ -2,10 +2,13 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Animation/AnimSequence.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -37,6 +40,29 @@ namespace
 		NeckBone, HandL, HandR, PadL, PadR,
 		PartCount
 	};
+
+	// Start times come from sampling the hand in each animation: the attack's hand
+	// peaks about 0.7 s in and the jump's arms top out around 0.75 s, so these
+	// land those moments on the sim's contact. Rate 0 holds a single pose.
+	struct FClipInfo
+	{
+		const TCHAR* Asset;
+		float Start;
+		float Rate;
+		bool bLoop;
+	};
+	const FClipInfo ClipInfo[] = {
+		{TEXT("A_Idle"), 0.f, 1.f, true},
+		{TEXT("A_Run"), 0.f, 1.f, true},
+		{TEXT("A_Jump"), 0.33f, 0.f, false},    // Crouch: the dip before a jump reads as a passing stance
+		{TEXT("A_Jump"), 0.45f, 1.f, false},    // Set: arms rise to the ball
+		{TEXT("A_Jump"), 0.05f, 1.f, false},    // Block: dips, then goes up with the sim's jump
+		{TEXT("A_Spike"), 0.15f, 1.f, false},   // Spike
+		{TEXT("A_Spike"), 0.3f, 1.f, false},    // Serve
+		{TEXT("A_Dive"), 0.f, 1.6f, false},
+		{TEXT("A_Celebrate"), 0.f, 1.2f, true},
+	};
+	constexpr float DiveTravel = 0.3f;  // the share of the dive animation's own travel that is kept
 
 	// Where the joint sits between two ends of a limb with equal halves.
 	FVector JointBetween(const FVector& Start, FVector& End, float HalfLength, const FVector& BendTowards)
@@ -337,6 +363,7 @@ void AVC26Arena::BuildPlayers()
 		Number->SetTextRenderColor(FColor::White);
 		Numbers.Add(Number);
 	}
+	BuildAthletes();
 	ControlledMarker = AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f, 100.f, 1.f), FLinearColor(1.f, 0.9f, 0.f), false, false);
 	AwayMarker = AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f, 100.f, 1.f), FLinearColor(1.f, 0.35f, 0.3f), false, false);
 	BuildRing(TargetRing, FLinearColor(0.95f, 0.95f, 0.95f));
@@ -369,6 +396,100 @@ void AVC26Arena::PlaceRing(const TArray<TObjectPtr<UStaticMeshComponent>>& Ring,
 			Ring[i]->SetWorldScale3D(FVector(Radius * Arc * 0.0078f, 0.07f, 0.01f));
 		}
 	}
+}
+
+bool AVC26Arena::BuildAthletes()
+{
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Athlete/SK_Athlete.SK_Athlete"));
+	UMaterialInterface* Kit = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Athlete/M_AthleteTeam.M_AthleteTeam"));
+	if (!Mesh || !Kit)
+	{
+		return false;
+	}
+
+	for (const FClipInfo& Info : ClipInfo)
+	{
+		UAnimSequence* Anim = LoadObject<UAnimSequence>(nullptr, *FString::Printf(TEXT("/Game/Athlete/%s.%s"), Info.Asset, Info.Asset));
+		if (!Anim)
+		{
+			return false;
+		}
+		ClipAnims.Add(Anim);
+	}
+
+	for (int32 i = 0; i < 12; ++i)
+	{
+		USkeletalMeshComponent* Athlete = NewObject<USkeletalMeshComponent>(this);
+		Athlete->SetMobility(EComponentMobility::Movable);
+		Athlete->SetSkeletalMeshAsset(Mesh);
+		Athlete->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Athlete->SetAffectDistanceFieldLighting(false);
+		Athlete->SetAffectDynamicIndirectLighting(false);
+		// The hips are read every frame, so the pose must update even off camera.
+		Athlete->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		Athlete->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		Athlete->SetupAttachment(Root);
+		Athlete->RegisterComponent();
+		Athlete->SetWorldScale3D(FVector(Figures[i].Height));
+		UMaterialInstanceDynamic* Shirt = UMaterialInstanceDynamic::Create(Kit, this);
+		Shirt->SetVectorParameterValue(TEXT("Team"), i < 6 ? HomeJersey : AwayJersey);
+		Athlete->SetMaterial(0, Shirt);
+		Athletes.Add(Athlete);
+
+		for (int32 Part = 0; Part < PartCount; ++Part)
+		{
+			Parts[i * PartCount + Part]->SetVisibility(false);
+		}
+		Numbers[i]->SetVisibility(false);  // the kit already carries a number
+	}
+	return true;
+}
+
+void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward)
+{
+	FFigure& Figure = Figures[Player];
+	USkeletalMeshComponent* Athlete = Athletes[Player];
+
+	EClip Want = Figure.RunAmount > 0.25f ? EClip::Run : EClip::Idle;
+	switch (Pose)
+	{
+	case EPose::Idle: break;
+	case EPose::Pass: Want = EClip::Crouch; break;
+	case EPose::Set: Want = EClip::Set; break;
+	case EPose::Block: Want = EClip::Block; break;
+	case EPose::AttackWindUp: Want = EClip::Spike; break;
+	case EPose::ServeToss: Want = EClip::Serve; break;
+	case EPose::Dive: Want = EClip::Dive; break;
+	case EPose::Celebrate: Want = EClip::Celebrate; break;
+	case EPose::AttackSwing:
+		// Follows through whichever swing is already under way.
+		Want = Figure.Clip == EClip::Serve ? EClip::Serve : EClip::Spike;
+		break;
+	}
+
+	if (Want != Figure.Clip)
+	{
+		Figure.Clip = Want;
+		const int32 Index = static_cast<int32>(Want);
+		const FClipInfo& Info = ClipInfo[Index];
+		Athlete->PlayAnimation(ClipAnims[Index], Info.bLoop);
+		// Looping clips start at different points so a team never moves in unison.
+		Athlete->SetPosition(Info.bLoop ? ClipAnims[Index]->GetPlayLength() * (Player % 6) / 6.f : Info.Start, false);
+		Athlete->SetPlayRate(Info.Rate);
+	}
+	if (Want == EClip::Run)
+	{
+		Athlete->SetPlayRate(FMath::Clamp(Figure.RunAmount * 1.3f, 0.6f, 1.3f));
+	}
+
+	// Mixamo characters face +Y. Their run and dive also travel forward by
+	// themselves, which is cancelled here so the sim alone decides where they are.
+	const FRotator Rotation = Forward.Rotation() + FRotator(0.f, -90.f, 0.f);
+	const FVector Hips = Athlete->GetBoneLocation(TEXT("hips"), EBoneSpaces::ComponentSpace);
+	const float Cancel = Want == EClip::Dive ? 1.f - DiveTravel : 1.f;
+	const FVector Drift = Rotation.RotateVector(FVector(Hips.X, Hips.Y, 0.f)) * Figure.Height * Cancel;
+	const float Lift = FMath::Max(32.f - Hips.Z, 0.f);  // the dive ends below the floor without this
+	Athlete->SetWorldLocationAndRotation(Feet - Drift + FVector(0.f, 0.f, Lift), Rotation);
 }
 
 void AVC26Arena::BuildBall()
@@ -483,11 +604,18 @@ void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 		// The libero is the same body in a contrasting jersey.
 		Figure.ShownId = PlayerId;
 		const FLinearColor Jersey = PlayerId == 7 ? LiberoJersey : Player < 6 ? HomeJersey : AwayJersey;
-		for (const int32 Part : {Torso, UpperArmL, UpperArmR})
+		if (Athletes.IsEmpty())
 		{
-			Parts[Player * PartCount + Part]->SetMaterial(0, ColorMaterial(Jersey));
+			for (const int32 Part : {Torso, UpperArmL, UpperArmR})
+			{
+				Parts[Player * PartCount + Part]->SetMaterial(0, ColorMaterial(Jersey));
+			}
+			Numbers[Player]->SetText(FText::AsNumber(PlayerId));
 		}
-		Numbers[Player]->SetText(FText::AsNumber(PlayerId));
+		else if (UMaterialInstanceDynamic* Shirt = Cast<UMaterialInstanceDynamic>(Athletes[Player]->GetMaterial(0)))
+		{
+			Shirt->SetVectorParameterValue(TEXT("Team"), Jersey);
+		}
 	}
 	FVector Feet = SimToWorld(Sim->players()[Player].pos);
 	const FVector Up = FVector::UpVector;
@@ -513,6 +641,11 @@ void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 	const bool bDive = Pose == EPose::Dive;
 	const FVector Forward = bDive ? Figure.DiveDirection : Figure.Facing;
 	const FVector Side = FVector::CrossProduct(Up, Forward);
+	if (!Athletes.IsEmpty())
+	{
+		AnimateAthlete(Player, Pose, Feet, Forward);
+		return;
+	}
 	if (Pose == EPose::Celebrate)
 	{
 		Feet += Up * FMath::Abs(FMath::Sin(GetWorld()->GetTimeSeconds() * 7.f + Player)) * 16.f;  // jumping for joy
@@ -665,11 +798,18 @@ void AVC26Arena::SyncShapes(float DeltaSeconds)
 		if (Figures[i].bShown != bActive)
 		{
 			Figures[i].bShown = bActive;
-			for (int32 Part = 0; Part < PartCount; ++Part)
+			if (!Athletes.IsEmpty())
 			{
-				Parts[i * PartCount + Part]->SetVisibility(bActive);
+				Athletes[i]->SetVisibility(bActive, true);
 			}
-			Numbers[i]->SetVisibility(bActive);
+			else
+			{
+				for (int32 Part = 0; Part < PartCount; ++Part)
+				{
+					Parts[i * PartCount + Part]->SetVisibility(bActive);
+				}
+				Numbers[i]->SetVisibility(bActive);
+			}
 		}
 		if (bActive)
 		{

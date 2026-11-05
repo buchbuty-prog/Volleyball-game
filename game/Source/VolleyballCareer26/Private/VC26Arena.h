@@ -14,7 +14,9 @@
 #include "VC26Arena.generated.h"
 
 class UCameraComponent;
+class UAnimSequence;
 class UMaterialInstanceDynamic;
+class USkeletalMeshComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UInstancedStaticMeshComponent;
@@ -103,6 +105,9 @@ public:
 private:
 	enum class EPose : uint8 { Idle, Pass, Set, AttackWindUp, AttackSwing, Block, ServeToss, Dive, Celebrate };
 
+	// What a rigged athlete is playing. Several reuse one animation from a different start.
+	enum class EClip : uint8 { Idle, Run, Crouch, Set, Block, Spike, Serve, Dive, Celebrate, Count };
+
 	// Per-player animation state. The shapes themselves live in Parts.
 	struct FFigure
 	{
@@ -115,6 +120,7 @@ private:
 		float SwingLeft = 0.f;
 		FVector DiveDirection = FVector::ForwardVector;
 		int32 ShownId = -1;
+		EClip Clip = EClip::Count;
 		bool bShown = true;
 	};
 
@@ -165,6 +171,8 @@ private:
 	void BuildCourt();
 	void BuildCrowd();
 	void BuildPlayers();
+	bool BuildAthletes();
+	void AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward);
 	void BuildBall();
 	void BuildLights();
 	void ApplyVenue(bool bBeach);
@@ -204,6 +212,13 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UTextRenderComponent>> Numbers;
+
+	// Rigged players, when the Mixamo assets are present. Empty otherwise.
+	UPROPERTY()
+	TArray<TObjectPtr<USkeletalMeshComponent>> Athletes;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UAnimSequence>> ClipAnims;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> BallShape;
