@@ -10,7 +10,7 @@ Plan for about 150 GB of free disk space and a few hours of downloads.
 ## 1. Install the tools (Windows)
 
 1. **Epic Games Launcher**: download it from <https://www.unrealengine.com/download>, sign in or create a free Epic account.
-2. **Unreal Engine**: in the launcher open *Unreal Engine → Library*, click **+** next to *Engine Versions*, pick the newest **5.x** (5.7 or later) and click *Install*.
+2. **Unreal Engine**: in the launcher open *Unreal Engine → Library*, click **+** next to *Engine Versions*, pick **5.8** (the version this project is set to) and click *Install*.
    Before it starts, open *Options* and tick **Android** under *Target Platforms*.
 3. **Visual Studio 2022 Community** (free): <https://visualstudio.microsoft.com/>. In the installer, tick the **Game development with C++** workload, and in its details tick the *Unreal Engine installer* and the newest *Windows SDK*.
 
@@ -53,4 +53,5 @@ Exact SDK, NDK and Android Studio versions change with each engine release. Epic
 | `core/` | The volleyball rules in plain C++. Shared with the unit tests and the future ranked server |
 | `game/Plugins/VC26Core/` | Compiles `core/` into Unreal and adds the Blueprint nodes |
 | `game/Source/VolleyballCareer26/` | The game module: draws `RallySim`, reads input and shows the HUD. Rules and gameplay belong in `core/` |
+| `VC26CourtActor` | An earlier court demo with rotation labels and a libero display. It isn't spawned, but you can place it in a level to try it |
 | `game/Config/` | Mobile renderer, Android package and landscape settings |

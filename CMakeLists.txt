@@ -11,6 +11,7 @@ add_library(vc26_core
     core/src/MatchScore.cpp
     core/src/Ball.cpp
     core/src/RallySim.cpp
+    core/src/ServeFlight.cpp
 )
 target_include_directories(vc26_core PUBLIC core/include)
 if(MSVC)
