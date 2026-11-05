@@ -39,11 +39,20 @@ enum class EVC26Screen : uint8
 	Story
 };
 
+enum class EVC26Mode : uint8
+{
+	Indoor,
+	Beach,
+	Couch
+};
+
 enum class EVC26MenuAction : uint8
 {
 	ContinueCareer,
 	NewCareer,
 	QuickMatch,
+	BeachMatch,
+	CouchMatch,
 	Quit,
 	PlayNext,
 	OpenUpgrades,
@@ -87,6 +96,7 @@ public:
 	const vc26::MatchReport& GetReport() const { return Report; }
 	vc26::Archetype GetChosenArchetype() const { return static_cast<vc26::Archetype>(ChosenArchetype); }
 	bool IsCareerMatch() const { return bCareerMatch; }
+	bool IsCouchMatch() const { return bCouch; }
 	const FString& GetHomeName() const { return HomeName; }
 	const FString& GetAwayName() const { return AwayName; }
 
@@ -105,11 +115,12 @@ private:
 		float SwingLeft = 0.f;
 		FVector DiveDirection = FVector::ForwardVector;
 		int32 ShownId = -1;
+		bool bShown = true;
 	};
 
 	// Flow (VC26Arena.cpp).
 	void StartBackgroundMatch();
-	void StartMatch(bool bCareer);
+	void StartMatch(bool bCareer, EVC26Mode Mode = EVC26Mode::Indoor);
 	void FinishMatch();
 	void LeaveMatch();
 	void GoTo(EVC26Screen NewScreen);
@@ -119,16 +130,22 @@ private:
 	bool LoadCareer();
 	void UpdateTouch();
 	vc26::SimInput ReadInput() const;
+	vc26::SimInput ReadAwayInput() const;
 	void HandleEvents();
 	void SetBanner(const FString& Text);
 	void SetDifficulty(int32 Level);
 	void RunScreenshotTour(float DeltaSeconds);
 
 	// Replays (the sim is deterministic, so a copy plus the input log rebuilds a rally).
+	struct FLoggedInput
+	{
+		vc26::SimInput Home;
+		vc26::SimInput Away;
+	};
 	struct FClip
 	{
 		TSharedPtr<vc26::RallySim> Start;
-		TArray<vc26::SimInput> Inputs;
+		TArray<FLoggedInput> Inputs;
 		int32 Excitement = 0;
 	};
 	void BeginClip(const FClip& Clip);
@@ -150,6 +167,7 @@ private:
 	void BuildPlayers();
 	void BuildBall();
 	void BuildLights();
+	void ApplyVenue(bool bBeach);
 	void SyncShapes(float DeltaSeconds);
 	EPose PoseFor(int32 Player) const;
 	void AnimateFigure(int32 Player, float DeltaSeconds);
@@ -210,13 +228,26 @@ private:
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> ControlledMarker;
 
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> AwayMarker;
+
+	// Swapped between the indoor hall and the beach.
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> RoofShapes;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> WallShapes;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> Sand;
+
 	TUniquePtr<vc26::RallySim> Sim;
 	TUniquePtr<vc26::RallySim> ParkedSim;  // the live match, while a replay plays in Sim
 	TSharedPtr<vc26::RallySim> Snapshot;   // the rally at its last set or serve
-	TArray<vc26::SimInput> InputLog;       // everything since Snapshot
+	TArray<FLoggedInput> InputLog;         // everything since Snapshot
 	TArray<FClip> ReplayQueue;
 	TArray<FClip> Highlights;
-	TArray<vc26::SimInput> ReplayInputs;
+	TArray<FLoggedInput> ReplayInputs;
 	int32 ReplayCursor = 0;
 	EVC26Screen ReplayReturn = EVC26Screen::Match;
 	int32 RallyExcitement = 0;
@@ -231,6 +262,7 @@ private:
 	int32 MenuIndex = 0;
 	int32 ChosenArchetype = 0;
 	bool bCareerMatch = false;
+	bool bCouch = false;
 	FString HomeName = TEXT("HOME");
 	FString AwayName = TEXT("AWAY");
 

@@ -106,22 +106,26 @@ void AVC26Arena::BuildHall()
 {
 	const FLinearColor WallColor(0.05f, 0.06f, 0.1f);
 	AddShape(CubeMesh, FVector(0, 0, -10.f), FVector(HallHalfX * 2.f, HallHalfY * 2.f, 20.f), FLinearColor(0.02f, 0.16f, 0.24f), false);
-	AddShape(CubeMesh, FVector(HallHalfX, 0, HallHeight / 2.f), FVector(20.f, HallHalfY * 2.f, HallHeight), WallColor, false);
-	AddShape(CubeMesh, FVector(-HallHalfX, 0, HallHeight / 2.f), FVector(20.f, HallHalfY * 2.f, HallHeight), WallColor, false);
-	AddShape(CubeMesh, FVector(0, HallHalfY, HallHeight / 2.f), FVector(HallHalfX * 2.f, 20.f, HallHeight), WallColor, false);
-	AddShape(CubeMesh, FVector(0, -HallHalfY, HallHeight / 2.f), FVector(HallHalfX * 2.f, 20.f, HallHeight), WallColor, false);
-	AddShape(CubeMesh, FVector(0, 0, HallHeight), FVector(HallHalfX * 2.f, HallHalfY * 2.f, 20.f), FLinearColor(0.03f, 0.03f, 0.05f), false);
+	WallShapes.Add(AddShape(CubeMesh, FVector(HallHalfX, 0, HallHeight / 2.f), FVector(20.f, HallHalfY * 2.f, HallHeight), WallColor, false));
+	WallShapes.Add(AddShape(CubeMesh, FVector(-HallHalfX, 0, HallHeight / 2.f), FVector(20.f, HallHalfY * 2.f, HallHeight), WallColor, false));
+	WallShapes.Add(AddShape(CubeMesh, FVector(0, HallHalfY, HallHeight / 2.f), FVector(HallHalfX * 2.f, 20.f, HallHeight), WallColor, false));
+	WallShapes.Add(AddShape(CubeMesh, FVector(0, -HallHalfY, HallHeight / 2.f), FVector(HallHalfX * 2.f, 20.f, HallHeight), WallColor, false));
+	RoofShapes.Add(AddShape(CubeMesh, FVector(0, 0, HallHeight), FVector(HallHalfX * 2.f, HallHalfY * 2.f, 20.f), FLinearColor(0.03f, 0.03f, 0.05f), false));
+
+	// Covers the hall floor for beach matches.
+	Sand = AddShape(CubeMesh, FVector(0, 0, 1.9f), FVector(HallHalfX * 2.f, HallHalfY * 2.f, 0.2f), FLinearColor(0.62f, 0.43f, 0.2f), false);
+	Sand->SetVisibility(false);
 
 	// Roof trusses and light banks, for depth when the camera looks up.
 	for (float X = -1500.f; X <= 1500.f; X += 500.f)
 	{
-		AddShape(CubeMesh, FVector(X, 0, HallHeight - 60.f), FVector(30.f, HallHalfY * 2.f, 40.f), FLinearColor(0.12f, 0.12f, 0.14f), false);
+		RoofShapes.Add(AddShape(CubeMesh, FVector(X, 0, HallHeight - 60.f), FVector(30.f, HallHalfY * 2.f, 40.f), FLinearColor(0.12f, 0.12f, 0.14f), false));
 	}
 	for (float X = -800.f; X <= 800.f; X += 400.f)
 	{
 		for (const float Y : {-400.f, 400.f})
 		{
-			AddShape(CubeMesh, FVector(X, Y, HallHeight - 110.f), FVector(240.f, 90.f, 12.f), FLinearColor(1.f, 0.98f, 0.92f), false);
+			RoofShapes.Add(AddShape(CubeMesh, FVector(X, Y, HallHeight - 110.f), FVector(240.f, 90.f, 12.f), FLinearColor(1.f, 0.98f, 0.92f), false));
 		}
 	}
 
@@ -139,15 +143,30 @@ void AVC26Arena::BuildHall()
 	}
 }
 
+void AVC26Arena::ApplyVenue(bool bBeach)
+{
+	Sand->SetVisibility(bBeach);
+	for (UStaticMeshComponent* Shape : RoofShapes)
+	{
+		Shape->SetVisibility(!bBeach);
+	}
+	UMaterialInstanceDynamic* Wall = ColorMaterial(bBeach ? FLinearColor(0.35f, 0.62f, 0.9f) : FLinearColor(0.05f, 0.06f, 0.1f));
+	for (UStaticMeshComponent* Shape : WallShapes)
+	{
+		Shape->SetMaterial(0, Wall);
+	}
+}
+
 void AVC26Arena::BuildCourt()
 {
 	const float Length = vc26::kCourtHalfLength;
 	const float Width = vc26::kCourtHalfWidth;
 	const float LineWidth = 0.05f;
 
-	AddShape(CubeMesh, FVector(0, 0, 0.5f), FVector(Length * 2.f + 8.f, Width * 2.f + 6.f, 0.01f) * MetresToCm, FLinearColor(0.03f, 0.3f, 0.42f), false);
-	AddShape(CubeMesh, FVector(0, 0, 1.2f), FVector(Length * 2.f, Width * 2.f, 0.01f) * MetresToCm, FLinearColor(0.78f, 0.34f, 0.08f), false);
-	AddShape(CubeMesh, FVector(0, 0, 1.6f), FVector(6.f, Width * 2.f, 0.01f) * MetresToCm, FLinearColor(0.86f, 0.42f, 0.1f), false);  // front zone tint
+	// Indoor floor, hidden for beach matches along with the roof.
+	RoofShapes.Add(AddShape(CubeMesh, FVector(0, 0, 0.5f), FVector(Length * 2.f + 8.f, Width * 2.f + 6.f, 0.01f) * MetresToCm, FLinearColor(0.03f, 0.3f, 0.42f), false));
+	RoofShapes.Add(AddShape(CubeMesh, FVector(0, 0, 1.2f), FVector(Length * 2.f, Width * 2.f, 0.01f) * MetresToCm, FLinearColor(0.78f, 0.34f, 0.08f), false));
+	RoofShapes.Add(AddShape(CubeMesh, FVector(0, 0, 1.6f), FVector(6.f, Width * 2.f, 0.01f) * MetresToCm, FLinearColor(0.86f, 0.42f, 0.1f), false));  // front zone tint
 	AddLine(-Length, 0.f, LineWidth, Width * 2.f);
 	AddLine(Length, 0.f, LineWidth, Width * 2.f);
 	AddLine(0.f, Width, Length * 2.f, LineWidth);
@@ -319,6 +338,7 @@ void AVC26Arena::BuildPlayers()
 		Numbers.Add(Number);
 	}
 	ControlledMarker = AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f, 100.f, 1.f), FLinearColor(1.f, 0.9f, 0.f), false, false);
+	AwayMarker = AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f, 100.f, 1.f), FLinearColor(1.f, 0.35f, 0.3f), false, false);
 	BuildRing(TargetRing, FLinearColor(0.95f, 0.95f, 0.95f));
 	BuildRing(ReadyRing, FLinearColor(0.1f, 0.9f, 0.3f));
 	BuildRing(TimingRing, FLinearColor(1.f, 0.75f, 0.05f));
@@ -641,7 +661,20 @@ void AVC26Arena::SyncShapes(float DeltaSeconds)
 {
 	for (int32 i = 0; i < 12; ++i)
 	{
-		AnimateFigure(i, DeltaSeconds);
+		const bool bActive = Sim->playerActive(i);
+		if (Figures[i].bShown != bActive)
+		{
+			Figures[i].bShown = bActive;
+			for (int32 Part = 0; Part < PartCount; ++Part)
+			{
+				Parts[i * PartCount + Part]->SetVisibility(bActive);
+			}
+			Numbers[i]->SetVisibility(bActive);
+		}
+		if (bActive)
+		{
+			AnimateFigure(i, DeltaSeconds);
+		}
 	}
 	UpdateBall(DeltaSeconds);
 
@@ -649,6 +682,9 @@ void AVC26Arena::SyncShapes(float DeltaSeconds)
 	const FVector Controlled = SimToWorld(Sim->players()[Sim->controlled()].pos);
 	ControlledMarker->SetVisibility(bMatch && Sim->humanHome());
 	ControlledMarker->SetWorldLocation(FVector(Controlled.X, Controlled.Y, 3.f));
+	const FVector Rival = SimToWorld(Sim->players()[Sim->controlled(vc26::Team::Away)].pos);
+	AwayMarker->SetVisibility(bMatch && Sim->humanAway());
+	AwayMarker->SetWorldLocation(FVector(Rival.X, Rival.Y, 3.f));
 
 	UpdateRings();
 	UpdateCrowd(DeltaSeconds);
@@ -691,7 +727,7 @@ void AVC26Arena::UpdateRings()
 	else if (bHuman && Sim->humanServing())
 	{
 		bShow = true;
-		Centre = SimToWorld(vc26::Vec3{6.f, Sim->serveAim(), 0.f});
+		Centre = SimToWorld(vc26::Vec3{Sim->servingTeam() == vc26::Team::Home ? 6.f : -6.f, Sim->serveAim(), 0.f});
 	}
 
 	Centre.Z = 4.f;

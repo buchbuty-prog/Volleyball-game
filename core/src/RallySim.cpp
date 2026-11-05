@@ -159,7 +159,7 @@ Vec3 RallySim::scatter(float radius) {
 }
 
 float RallySim::skillBoost(Team team, Skill skill) const {
-    if (!isHumanTeam(team)) return 0.f;
+    if (team != Team::Home || !config_.humanHome) return 0.f;
     // A locked player's ratings are theirs alone, not their teammates'.
     const int actor = skill == Skill::Serve ? serverIndex() : skill == Skill::Block ? block_.player : pending_.player;
     if (config_.lockedPlayer >= 0 && actor != config_.lockedPlayer) return 0.f;
@@ -196,7 +196,9 @@ float RallySim::serveGauge() const {
 }
 
 int RallySim::serverIndex() const {
-    return indexOfPlayer(serving_, rotation_[static_cast<int>(serving_)]->at(Slot::P1).id);
+    const int team = static_cast<int>(serving_);
+    if (config_.beach) return team * 6 + beachServer_[team];
+    return indexOfPlayer(serving_, rotation_[team]->at(Slot::P1).id);
 }
 
 int RallySim::indexOfPlayer(Team team, int id) const {
@@ -217,6 +219,7 @@ void RallySim::applyLiberoSwap(Team team, const std::optional<LiberoSwap>& swap)
 
 Vec3 RallySim::basePosition(int player) const {
     const SimPlayer& p = players_[player];
+    if (config_.beach) return {sideSign(p.team) * 5.5f, (player % 6 == 0 ? 2.2f : -2.2f) * leftSign(p.team), 0.f};
     const Slot slot = *rotation_[static_cast<int>(p.team)]->slotOf(p.id);
     const float depth = isFrontRow(slot) ? 2.5f : 6.5f;
     return {sideSign(p.team) * depth, slotAcross(slot) * leftSign(p.team), 0.f};
@@ -224,9 +227,14 @@ Vec3 RallySim::basePosition(int player) const {
 
 Vec3 RallySim::formationPosition(int player) const {
     const SimPlayer& p = players_[player];
+    const float own = sideSign(p.team);
+    if (config_.beach) {
+        // Our ball: the partner gets under it. Theirs: one up at the net, one deep.
+        if (pending_.active && pending_.team == p.team) return {own * 2.f, pending_.point.y * 0.5f, 0.f};
+        return {own * (player % 6 == 0 ? 1.f : 6.f), 0.f, 0.f};
+    }
     const RotationManager& rm = *rotation_[static_cast<int>(p.team)];
     const Slot slot = *rm.slotOf(p.id);
-    const float own = sideSign(p.team);
     const float left = leftSign(p.team);
     const bool front = isFrontRow(slot);
     const float across = slotAcross(slot);
@@ -257,22 +265,36 @@ void RallySim::startRally() {
 
     pressure_ = score_.setPointFor().has_value();
     serving_ = rotation_[0]->serving() ? Team::Home : Team::Away;
+    if (config_.beach) {
+        // Partners alternate each time their team wins the serve back.
+        if (serving_ != lastServing_) beachServer_[static_cast<int>(serving_)] ^= 1;
+        lastServing_ = serving_;
+        wind_ = {(rand01() - 0.5f) * 2.4f, (rand01() - 0.5f) * 2.4f, 0.f};
+    }
     lastTeam_ = serving_;
     lastKind_ = ContactKind::Serve;
-    controlled_ = serving_ == Team::Home ? serverIndex() : indexOfPlayer(Team::Home, rotation_[0]->at(Slot::P6).id);
-    if (config_.lockedPlayer >= 0) controlled_ = config_.lockedPlayer;
+    for (const Team team : {Team::Home, Team::Away}) {
+        const int side = static_cast<int>(team);
+        controlled_[side] = serving_ == team ? serverIndex() : config_.beach ? side * 6 : indexOfPlayer(team, rotation_[side]->at(Slot::P6).id);
+    }
+    if (config_.lockedPlayer >= 0) controlled_[0] = config_.lockedPlayer;
 }
 
-void RallySim::step(float dt, const SimInput& input) {
-    const bool pressed = input.action && !prevAction_;
-    prevAction_ = input.action;
+void RallySim::step(float dt, const SimInput& input, const SimInput& awayInput) {
+    const SimInput inputs[2] = {input, awayInput};
+    bool pressed[2];
+    for (int side = 0; side < 2; ++side) {
+        pressed[side] = inputs[side].action && !prevAction_[side];
+        prevAction_[side] = inputs[side].action;
+    }
+    const int server = static_cast<int>(serving_);
 
     switch (phase_) {
         case RallyPhase::PreServe:
-            updatePreServe(dt, input, pressed);
+            updatePreServe(dt, inputs[server], pressed[server]);
             break;
         case RallyPhase::InPlay:
-            updateInPlay(dt, input, pressed);
+            updateInPlay(dt, inputs, pressed);
             break;
         case RallyPhase::PointOver:
             timer_ += dt;
@@ -294,7 +316,7 @@ void RallySim::step(float dt, const SimInput& input) {
         case RallyPhase::MatchOver:
             break;
     }
-    movePlayers(dt, input);
+    movePlayers(dt, inputs);
 }
 
 void RallySim::updatePreServe(float dt, const SimInput& input, bool pressed) {
@@ -369,7 +391,7 @@ void RallySim::launch(Team team, int player, ContactKind kind, ContactQuality qu
     lastToucher_ = player;
     outsideAntenna_ = false;
     sinceContact_ = 0.f;
-    ball_.vel = velocity;
+    ball_.vel = velocity + wind_;
     ++rallyContacts_;
 
     SimEvent e;
@@ -392,12 +414,13 @@ int RallySim::chooseReceiver(Team team, int touch, Vec3 point, bool spikeable) c
     for (int i = first; i < first + 6; ++i) {
         if (i == lastToucher_ && lastTeam_ == team) continue;  // no double contact
         const RotationManager& rm = *rotation_[static_cast<int>(team)];
+        if (!playerActive(i)) continue;
         const int id = players_[i].id;
-        if (touch == 3 && spikeable && !isFrontRow(*rm.slotOf(id))) continue;
+        if (touch == 3 && spikeable && !config_.beach && !isFrontRow(*rm.slotOf(id))) continue;
 
         float cost = flatDistance(players_[i].pos, point);
         if (i == config_.lockedPlayer) cost -= 1.2f;  // a Be a Pro player calls for the ball
-        const bool setter = rm.at(*rm.slotOf(id)).role == Role::Setter;
+        const bool setter = !config_.beach && rm.at(*rm.slotOf(id)).role == Role::Setter;
         if (touch == 2 && setter) cost -= 2.f;
         if (touch == 1 && setter) cost += 1.5f;
         if (cost < bestCost) {
@@ -448,7 +471,7 @@ void RallySim::assignNext() {
     pending_.point = point;
     pending_.spike = touch == 3 && spikeable;
     pending_.pressLead = pending_.spike ? kJumpLead : 0.f;
-    if (humanDecides) controlled_ = receiver;
+    if (humanDecides) controlled_[static_cast<int>(side)] = receiver;
     if (touch == 3 && spikeable && !block_.active) startBlock(other(side), point, contactTime);
 }
 
@@ -458,8 +481,9 @@ void RallySim::startBlock(Team team, Vec3 attackPoint, float timeToContact) {
     int best = -1;
     float bestGap = 1e9f;
     for (int i = first; i < first + 6; ++i) {
-        if (!isFrontRow(*rm.slotOf(players_[i].id))) continue;
-        const float gap = std::fabs(players_[i].pos.y - attackPoint.y);
+        if (!playerActive(i) || (!config_.beach && !isFrontRow(*rm.slotOf(players_[i].id)))) continue;
+        // On the beach whoever is nearer the net goes up; indoors, whoever is across from the hitter.
+        const float gap = config_.beach ? std::fabs(players_[i].pos.x) : std::fabs(players_[i].pos.y - attackPoint.y);
         if (gap < bestGap) {
             bestGap = gap;
             best = i;
@@ -468,7 +492,7 @@ void RallySim::startBlock(Team team, Vec3 attackPoint, float timeToContact) {
 
     // A Be a Pro player in the front row takes the block if it's anywhere near them.
     const int locked = config_.lockedPlayer;
-    if (locked >= first && locked < first + 6 && isFrontRow(*rm.slotOf(players_[locked].id)) &&
+    if (!config_.beach && locked >= first && locked < first + 6 && isFrontRow(*rm.slotOf(players_[locked].id)) &&
         std::fabs(players_[locked].pos.y - attackPoint.y) < 2.5f) {
         best = locked;
     }
@@ -481,7 +505,8 @@ void RallySim::startBlock(Team team, Vec3 attackPoint, float timeToContact) {
     block_.pressLead = kBlockLead;
     block_.attackPoint = attackPoint;
     block_.shade = (rand01() * 2.f - 1.f) * (quickSet_ ? 1.8f : 0.8f);
-    if (isHumanTeam(team) && locked < 0) controlled_ = best;
+    if (isHumanTeam(team) && locked < 0) controlled_[static_cast<int>(team)] = best;
+    if (config_.beach) return;  // no second blocker with two a side
 
     float nearest = 1e9f;
     for (int i = first; i < first + 6; ++i) {
@@ -597,8 +622,9 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
         float across = (static_cast<int>(rand01() * 3.f) - 1) * 3.2f;
         if (human) across = std::fabs(aim.moveY) > 0.3f ? (aim.moveY > 0.f ? 3.2f : -3.2f) : 0.f;
         const float call = rand01();  // what the CPU setter calls
-        const bool quick = human ? aim.moveX > 0.5f : call < 0.2f;
-        const bool dump = human ? aim.moveX < -0.5f : call > 0.95f;
+        const float forward = aim.moveX * -own;  // towards the opponent, for either team
+        const bool quick = human ? forward > 0.5f : call < 0.2f;
+        const bool dump = human ? forward < -0.5f : call > 0.95f;
 
         // CPU setters look for a Be a Pro hitter most of the time.
         const int locked = config_.lockedPlayer;
@@ -626,7 +652,7 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     float depth = 3.f + rand01() * 5.2f;
     if (human) {
         across = aim.moveY * 3.8f;
-        depth = 6.f + aim.moveX * 2.3f;
+        depth = 6.f + aim.moveX * -own * 2.3f;
     } else {
         // Better CPU hitters look at more shots and take the one furthest from a defender.
         const int looks = config_.cpuSkill < 0.5f ? 1 : config_.cpuSkill < 0.9f ? 2 : 3;
@@ -661,10 +687,13 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     launch(team, contact.player, ContactKind::Attack, quality, launchVelocity(from, target, t));
 }
 
-void RallySim::updateInPlay(float dt, const SimInput& input, bool pressed) {
+void RallySim::updateInPlay(float dt, const SimInput* inputs, const bool* pressedBy) {
     sinceContact_ += dt;
-    if (updateBlock(dt, pressed)) pressed = false;
+    const bool blockUsedPress = updateBlock(dt, block_.active && pressedBy[static_cast<int>(block_.team)]);
     if (pending_.active) {
+        const int side = static_cast<int>(pending_.team);
+        const SimInput& input = inputs[side];
+        const bool pressed = pressedBy[side] && !(blockUsedPress && block_.team == pending_.team);
         pending_.timeToContact -= dt;
         const bool human = isHumanPlayer(pending_.player);
 
@@ -785,9 +814,12 @@ void RallySim::endRally(Team winner, PointReason reason) {
     updateMomentum(winner, result.setWon);
 }
 
-void RallySim::movePlayers(float dt, const SimInput& input) {
+void RallySim::movePlayers(float dt, const SimInput* inputs) {
     for (int i = 0; i < 12; ++i) {
+        if (!playerActive(i)) continue;
         SimPlayer& p = players_[i];
+        const SimInput& input = inputs[static_cast<int>(p.team)];
+        const int controlled = controlled_[static_cast<int>(p.team)];
         const float own = sideSign(p.team);
         const bool human = isHumanPlayer(i);
         const float rate = human ? kHumanAcceleration : kCpuAcceleration;
@@ -814,7 +846,7 @@ void RallySim::movePlayers(float dt, const SimInput& input) {
                     accelerate(p, 0.f, 0.f, rate, dt);
                 } else {
                     if (!human) y = block_.attackPoint.y + block_.shade;
-                    else if (controlled_ == i) y = p.pos.y + input.moveY * 1.5f;
+                    else if (controlled == i) y = p.pos.y + input.moveY * 1.5f;
                     y = std::clamp(y, -kCourtHalfWidth, kCourtHalfWidth);
                     steer(p, Vec3{own * kBlockerDepth, y, 0.f}, kPlayerSpeed, kHumanAcceleration, dt);
                 }
@@ -828,7 +860,7 @@ void RallySim::movePlayers(float dt, const SimInput& input) {
                 }
             } else if (chosen && pending_.touch > 1) {
                 steer(p, pending_.point, kPlayerSpeed + 0.5f, kHumanAcceleration, dt);
-            } else if (human && i == controlled_ && !server && (live || phase_ == RallyPhase::PreServe)) {
+            } else if (human && i == controlled && !server && (live || phase_ == RallyPhase::PreServe)) {
                 float x = input.moveX;
                 float y = input.moveY;
                 const float len = std::hypot(x, y);

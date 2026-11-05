@@ -110,6 +110,8 @@ void AVC26Arena::StartBackgroundMatch()
 	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
 	Config.humanHome = false;
 	Sim = MakeUnique<vc26::RallySim>(Config);
+	ApplyVenue(false);
+	bCouch = false;
 	ReplayCountdown = -1.f;
 	bCareerMatch = false;
 	HomeName = TEXT("HOME");
@@ -117,7 +119,7 @@ void AVC26Arena::StartBackgroundMatch()
 	Accumulator = 0.f;
 }
 
-void AVC26Arena::StartMatch(bool bCareer)
+void AVC26Arena::StartMatch(bool bCareer, EVC26Mode Mode)
 {
 	vc26::RallySim::Config Config;
 	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
@@ -136,6 +138,20 @@ void AVC26Arena::StartMatch(bool bCareer)
 		HomeName = UTF8_TO_TCHAR(Career->myTeam().name.c_str());
 		AwayName = UTF8_TO_TCHAR(Career->teams()[Career->nextOpponent()].name.c_str());
 	}
+
+	if (Mode == EVC26Mode::Beach)
+	{
+		Config.rules = vc26::MatchRules::beach();
+		Config.beach = true;
+	}
+	if (Mode == EVC26Mode::Couch)
+	{
+		Config.humanAway = true;
+		HomeName = TEXT("PLAYER 1");
+		AwayName = TEXT("PLAYER 2");
+	}
+	ApplyVenue(Mode == EVC26Mode::Beach);
+	bCouch = Mode == EVC26Mode::Couch;
 
 	Sim = MakeUnique<vc26::RallySim>(Config);
 	Stats = {};
@@ -191,6 +207,8 @@ TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 		}
 		Items.Add({TEXT("New Career"), EVC26MenuAction::NewCareer});
 		Items.Add({TEXT("Quick Match"), EVC26MenuAction::QuickMatch});
+		Items.Add({TEXT("Beach 2v2"), EVC26MenuAction::BeachMatch});
+		Items.Add({TEXT("Couch Match (2 Players)"), EVC26MenuAction::CouchMatch});
 		Items.Add({TEXT("Quit"), EVC26MenuAction::Quit});
 		break;
 	case EVC26Screen::Hub:
@@ -261,6 +279,8 @@ void AVC26Arena::ConfirmMenu()
 		break;
 	case EVC26MenuAction::NewCareer: GoTo(EVC26Screen::CreatePlayer); break;
 	case EVC26MenuAction::QuickMatch: StartMatch(false); break;
+	case EVC26MenuAction::BeachMatch: StartMatch(false, EVC26Mode::Beach); break;
+	case EVC26MenuAction::CouchMatch: StartMatch(false, EVC26Mode::Couch); break;
 	case EVC26MenuAction::Quit: FPlatformMisc::RequestExit(false, TEXT("VC26 menu")); break;
 	case EVC26MenuAction::PlayNext: StartMatch(true); break;
 	case EVC26MenuAction::OpenUpgrades: GoTo(EVC26Screen::Upgrades); break;
@@ -430,7 +450,9 @@ vc26::SimInput AVC26Arena::ReadInput() const
 		return Input;
 	}
 
-	auto Held = [Player](const FKey& A, const FKey& B) { return Player->IsInputKeyDown(A) || Player->IsInputKeyDown(B); };
+	// In a couch match the arrows and gamepad belong to Player 2.
+	const bool bShared = !bCouch;
+	auto Held = [Player, bShared](const FKey& A, const FKey& B) { return Player->IsInputKeyDown(A) || (bShared && Player->IsInputKeyDown(B)); };
 
 	Input.moveX = (Held(EKeys::W, EKeys::Up) ? 1.f : 0.f) - (Held(EKeys::S, EKeys::Down) ? 1.f : 0.f);
 	Input.moveY = (Held(EKeys::A, EKeys::Left) ? 1.f : 0.f) - (Held(EKeys::D, EKeys::Right) ? 1.f : 0.f);
@@ -440,11 +462,30 @@ vc26::SimInput AVC26Arena::ReadInput() const
 		Input.moveX += Fingers.moveX;
 		Input.moveY += Fingers.moveY;
 	}
-	Input.moveX += Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftY);
-	Input.moveY -= Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftX);
+	if (bShared)
+	{
+		Input.moveX += Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftY);
+		Input.moveY -= Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftX);
+	}
 	Input.moveX = FMath::Clamp(Input.moveX, -1.f, 1.f);
 	Input.moveY = FMath::Clamp(Input.moveY, -1.f, 1.f);
 	Input.action = Held(EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom) || (bUseTouch && Touch.actionHeld());
+	return Input;
+}
+
+vc26::SimInput AVC26Arena::ReadAwayInput() const
+{
+	vc26::SimInput Input;
+	const APlayerController* Player = Cast<APlayerController>(GetController());
+	if (!Player || !bCouch)
+	{
+		return Input;
+	}
+	Input.moveX = (Player->IsInputKeyDown(EKeys::Up) ? 1.f : 0.f) - (Player->IsInputKeyDown(EKeys::Down) ? 1.f : 0.f) + Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftY);
+	Input.moveY = (Player->IsInputKeyDown(EKeys::Left) ? 1.f : 0.f) - (Player->IsInputKeyDown(EKeys::Right) ? 1.f : 0.f) - Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftX);
+	Input.moveX = FMath::Clamp(Input.moveX, -1.f, 1.f);
+	Input.moveY = FMath::Clamp(Input.moveY, -1.f, 1.f);
+	Input.action = Player->IsInputKeyDown(EKeys::Enter) || Player->IsInputKeyDown(EKeys::RightControl) || Player->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom);
 	return Input;
 }
 
@@ -510,6 +551,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	{
 		Input.action = FMath::Fmod(TourTime, 1.5f) < 0.6f;  // the tour serves for itself
 	}
+	const vc26::SimInput AwayInput = Screen == EVC26Screen::Match ? ReadAwayInput() : vc26::SimInput();
 	if (Sim->phase() == vc26::RallyPhase::MatchOver)
 	{
 		if (Screen != EVC26Screen::Match || !Sim->humanHome())
@@ -529,8 +571,8 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	Accumulator = FMath::Min(Accumulator + SimDelta, 0.25f);
 	while (Accumulator >= SimStep)
 	{
-		Sim->step(SimStep, Input);
-		InputLog.Add(Input);
+		Sim->step(SimStep, Input, AwayInput);
+		InputLog.Add({Input, AwayInput});
 		Accumulator -= SimStep;
 	}
 
@@ -596,7 +638,8 @@ void AVC26Arena::UpdateReplay(float DeltaSeconds)
 	Accumulator = FMath::Min(Accumulator + DeltaSeconds * ReplaySpeed, 0.25f);
 	while (Accumulator >= SimStep && ReplayCursor < ReplayInputs.Num())
 	{
-		Sim->step(SimStep, ReplayInputs[ReplayCursor++]);
+		const FLoggedInput& Logged = ReplayInputs[ReplayCursor++];
+		Sim->step(SimStep, Logged.Home, Logged.Away);
 		Accumulator -= SimStep;
 	}
 	if (ReplayCursor >= ReplayInputs.Num())
@@ -869,6 +912,14 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 	case 13: Shot(TEXT("7_match_a")); break;
 	case 14: Shot(TEXT("8_match_b")); break;
 	case 15: Shot(TEXT("9_match_c")); StartMatch(false); break;
+	case 19:
+		if (IsReplaying())
+		{
+			EndReplay();
+		}
+		StartMatch(false, EVC26Mode::Beach);
+		break;
+	case 20: Shot(TEXT("13_beach")); break;
 	default: FPlatformMisc::RequestExit(false, TEXT("VC26 screenshot tour")); break;
 	}
 }

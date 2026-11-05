@@ -382,7 +382,16 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 
 	const vc26::TouchControls* Touch = Arena.GetTouch();
 	const bool bTouch = Touch != nullptr;
-	if (!Arena.IsCareerMatch() && Sim.humanHome())
+	if (Sim.beach())
+	{
+		const vc26::Vec3 Wind = Sim.wind();
+		Label(FString::Printf(TEXT("Wind %.1f m/s %s"), FMath::Sqrt(Wind.x * Wind.x + Wind.y * Wind.y), Wind.y > 0.f ? TEXT("<<<") : TEXT(">>>")), 1500.f, 40.f, FLinearColor::White, 1.2f);
+	}
+	if (Arena.IsCouchMatch())
+	{
+		Label(TEXT("P1: WASD + Space    P2: Arrows + Enter, or gamepad"), 40.f, 150.f, Muted, 1.f);
+	}
+	else if (!Arena.IsCareerMatch() && Sim.humanHome())
 	{
 		Label(FString::Printf(TEXT("%s  %s"), Arena.GetDifficultyName(), bTouch ? TEXT("(tap to change)") : TEXT("(1 Easy, 2 Normal, 3 Hard)")), 40.f, 150.f, Muted, bTouch ? 1.6f : 1.f);
 	}
@@ -403,7 +412,8 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 	if (Sim.phase() == vc26::RallyPhase::MatchOver)
 	{
 		const bool bHomeWon = Sim.score().winner() == Team::Home;
-		DrawCentred(bHomeWon ? TEXT("YOU WIN THE MATCH") : TEXT("YOU LOST THE MATCH"), 440.f, FLinearColor::White, 3.f);
+		const FString Result = Arena.IsCouchMatch() ? (bHomeWon ? Arena.GetHomeName() : Arena.GetAwayName()) + TEXT(" WINS") : FString(bHomeWon ? TEXT("YOU WIN THE MATCH") : TEXT("YOU LOST THE MATCH"));
+		DrawCentred(Result, 440.f, FLinearColor::White, 3.f);
 		DrawCentred(bTouch ? TEXT("Tap the right side to continue") : TEXT("Press SPACE to continue"), 530.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.4f);
 		return;
 	}

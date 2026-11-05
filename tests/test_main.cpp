@@ -885,6 +885,96 @@ TEST(setter_plays_follow_the_stick) {
     CHECK(dump.second > high.second);
 }
 
+// --- Beach and couch --------------------------------------------------------
+
+TEST(beach_is_two_a_side_with_alternating_servers_and_wind) {
+    RallySim::Config c;
+    c.rules = MatchRules::beach();
+    c.beach = true;
+    c.seed = 17;
+    c.humanHome = false;
+    RallySim sim(c);
+    bool windBlew = false;
+    std::array<bool, 12> touched{}, served{};
+    int contacts = 0, points = 0;
+    for (long i = 0; i < 8000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+        sim.step(kDt, {});
+        windBlew = windBlew || std::fabs(sim.wind().x) + std::fabs(sim.wind().y) > 0.1f;
+        for (const SimEvent& e : sim.takeEvents()) {
+            if (e.type == SimEvent::Type::Point) ++points;
+            if (e.type != SimEvent::Type::Contact) continue;
+            ++contacts;
+            touched[e.player] = true;
+            if (e.kind == ContactKind::Serve) served[e.player] = true;
+        }
+    }
+    CHECK(sim.phase() == RallyPhase::MatchOver);
+    CHECK(sim.score().sets(*sim.score().winner()) == 2);  // best of three
+    CHECK(windBlew);
+    for (int i = 0; i < 12; ++i) {
+        CHECK(touched[i] == sim.playerActive(i));
+        CHECK(served[i] == sim.playerActive(i));
+    }
+    const float average = static_cast<float>(contacts) / static_cast<float>(points);
+    std::printf("  beach: %.1f contacts a rally\n", static_cast<double>(average));
+    CHECK(average > 2.5f);
+}
+
+TEST(wind_keeps_the_landing_prediction_exact) {
+    RallySim::Config c;
+    c.beach = true;
+    c.seed = 2;
+    c.humanHome = false;
+    RallySim sim(c);
+    int checked = 0;
+    Vec3 predicted;
+    bool have = false;
+    for (long i = 0; i < 2000000L && checked < 40; ++i) {
+        have = sim.hasLanding();
+        if (have) predicted = sim.landing();
+        sim.step(kDt, {});
+        for (const SimEvent& e : sim.takeEvents()) {
+            if (e.type != SimEvent::Type::Point || !have || e.reason == PointReason::NetTouch) continue;
+            const Vec3 landed = sim.ball().pos;
+            CHECK(std::hypot(landed.x - predicted.x, landed.y - predicted.y) < 0.05f);
+            ++checked;
+        }
+    }
+    CHECK(checked >= 40);
+}
+
+TEST(couch_mode_gives_each_person_their_own_team) {
+    RallySim::Config c;
+    c.seed = 9;
+    c.humanAway = true;
+    c.rules = Career::matchRules();
+    RallySim sim(c);
+    bool held[2] = {false, false};
+    int touches[2] = {0, 0};
+    for (long i = 0; i < 6000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+        SimInput in[2];
+        for (const Team team : {Team::Home, Team::Away}) {
+            const int side = static_cast<int>(team);
+            bool want = false;
+            if (sim.humanServing() && sim.servingTeam() == team) {
+                want = sim.serveCharging() ? sim.serveGauge() < 0.7f : !held[side];
+            } else if (sim.humanBlocking() && sim.block().team == team) {
+                want = sim.block().timeToContact - sim.block().pressLead <= 0.f;
+            } else if (sim.humanToPlay() && sim.pending().team == team) {
+                want = sim.pending().timeToContact - sim.pending().pressLead <= 0.f && !held[side];
+            }
+            in[side].action = want;
+            held[side] = want;
+        }
+        sim.step(kDt, in[0], in[1]);
+        for (const SimEvent& e : sim.takeEvents()) {
+            if (e.type == SimEvent::Type::Contact) ++touches[static_cast<int>(e.team)];
+        }
+    }
+    CHECK(sim.phase() == RallyPhase::MatchOver);
+    CHECK(touches[0] > 10 && touches[1] > 10);
+}
+
 // --- Career -----------------------------------------------------------------
 
 namespace {

@@ -22,11 +22,14 @@ Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run 
 |---|---|
 | W A S D / arrows / left stick | Steer to the ball (your player runs there by itself if you don't). Aim the serve, set and attack. Slide along the net when blocking |
 | Space / gamepad A | Hold and release to serve. Otherwise press as the closing gold ring meets the ring on the floor: to pass, to set, and to jump for an attack or block |
+| On a set | A / D outside hitters, W quick, S dump over the net |
+| H on the match report | Watch the highlights |
 | 1 / 2 / 3 | Easy, Normal or Hard CPU |
+| Couch Match | Player 1 uses WASD + Space. Player 2 uses arrows + Enter, or a gamepad |
 
 You control whichever Home player the ball is going to, or your nearest front-row blocker when the opponent attacks. Sets and attacks position the player for you.
 
-The main menu has **New Career**, **Continue Career** and **Quick Match**. In a career you pick an archetype, play an eight-team league and a final, spend skill points, and climb from the University Circuit to the World Stage. Press Esc to leave a match without it counting. Careers save to `game/Saved/VC26Career.sav`.
+The main menu has **New Career**, **Continue Career**, **Quick Match**, **Beach 2v2** and **Couch Match**. In a career you pick an archetype and play only that player, in an eight-team league and a final. You spend skill points, face a rival, answer press and coaching choices, and climb from the University Circuit to the World Stage. Press Esc to leave a match without it counting. Careers save to `game/Saved/VC26Career.sav`.
 
 ## Build & test
 

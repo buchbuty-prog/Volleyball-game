@@ -105,12 +105,14 @@ public:
         SkillRatings humanSkills = {kNeutralSkill, kNeutralSkill, kNeutralSkill, kNeutralSkill, kNeutralSkill};
         int lockedPlayer = -1;       // Be a Pro: the only Home player the human controls (-1 = all of them)
         float teammateSkill = -1.f;  // how the CPU plays around a locked player (-1 = same as cpuSkill)
+        bool humanAway = false;      // a second person plays the Away team
+        bool beach = false;          // two a side, no rotation or libero, and wind
     };
 
     explicit RallySim(const Config& config);
 
     // Call at a fixed rate. Input is read for the Home player being controlled.
-    void step(float dt, const SimInput& input);
+    void step(float dt, const SimInput& input, const SimInput& awayInput = {});
 
     RallyPhase phase() const { return phase_; }
     const Ball& ball() const { return ball_; }
@@ -121,7 +123,11 @@ public:
     bool humanBlocking() const { return block_.active && !block_.committed && isHumanPlayer(block_.player); }
     float blockReach(Team team) const;  // metres either side of the blocker
     Team servingTeam() const { return serving_; }
-    int controlled() const { return controlled_; }
+    int controlled(Team team = Team::Home) const { return controlled_[static_cast<int>(team)]; }
+    bool humanAway() const { return config_.humanAway; }
+    bool beach() const { return config_.beach; }
+    bool playerActive(int player) const { return !config_.beach || player % 6 < 2; }
+    Vec3 wind() const { return wind_; }  // added to every contact, so predictions stay exact
     int server() const { return serverIndex(); }
     bool humanHome() const { return config_.humanHome; }
     void setCpuSkill(float skill) { config_.cpuSkill = skill; }
@@ -151,8 +157,8 @@ public:
 private:
     void startRally();
     void updatePreServe(float dt, const SimInput& input, bool pressed);
-    void updateInPlay(float dt, const SimInput& input, bool pressed);
-    void movePlayers(float dt, const SimInput& input);
+    void updateInPlay(float dt, const SimInput* inputs, const bool* pressed);
+    void movePlayers(float dt, const SimInput* inputs);
     void serveHuman(float power);
     void serveCpu();
     void serveAt(Vec3 target, float netMargin);
@@ -170,9 +176,11 @@ private:
     int chooseReceiver(Team team, int touch, Vec3 point, bool spikeable) const;
     Vec3 basePosition(int player) const;
     Vec3 formationPosition(int player) const;
-    bool isHumanTeam(Team team) const { return config_.humanHome && team == Team::Home; }
+    bool isHumanTeam(Team team) const { return team == Team::Home ? config_.humanHome : config_.humanAway; }
     bool isHumanPlayer(int player) const {
-        return config_.humanHome && player >= 0 && (config_.lockedPlayer < 0 ? player < 6 : player == config_.lockedPlayer);
+        if (player < 0) return false;
+        if (player >= 6) return config_.humanAway;
+        return config_.humanHome && (config_.lockedPlayer < 0 || player == config_.lockedPlayer);
     }
     float skillBoost(Team team, Skill skill) const;  // about -1..1; 0 for CPU teams
     std::optional<ContactQuality> gradePress(Team team, float error) const;
@@ -191,7 +199,7 @@ private:
     Ball ball_;
     Team serving_ = Team::Home;
     float timer_ = 0.f;
-    bool prevAction_ = false;
+    bool prevAction_[2] = {false, false};
 
     bool charging_ = false;
     bool tossing_ = false;
@@ -218,7 +226,10 @@ private:
     bool stretching_ = false;
     bool quickSet_ = false;  // the set in the air is a quick, which beats the block to the spot
     int rallyContacts_ = 0;
-    int controlled_ = 0;
+    int controlled_[2] = {0, 6};
+    int beachServer_[2] = {0, 0};
+    Team lastServing_ = Team::Home;
+    Vec3 wind_;
 
     std::vector<SimEvent> events_;
 };
