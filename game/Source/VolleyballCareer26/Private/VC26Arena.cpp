@@ -1,36 +1,28 @@
 #include "VC26Arena.h"
 
 #include "Camera/CameraComponent.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/PlatformMisc.h"
 #include "InputCoreTypes.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
 #include "Misc/CommandLine.h"
 #include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVC26, Log, All);
 
 namespace
 {
 	constexpr float SimStep = 1.f / 120.f;
-	constexpr float MetresToCm = 100.f;
 	constexpr float CpuSkillLevels[] = {0.35f, 0.7f, 1.f};
 	constexpr float SlowMoScale = 0.4f;  // GDD 1.1: 0.4x for 300 ms on a power spike
 	constexpr float SlowMoSeconds = 0.3f;
 
-	const FLinearColor HomeColor(0.05f, 0.25f, 0.85f);
-	const FLinearColor AwayColor(0.8f, 0.08f, 0.08f);
-	const FLinearColor HeadColor(0.85f, 0.6f, 0.45f);
-
-	// core/ is right-handed and Unreal is left-handed, so y flips. This keeps
-	// Home's left on the left of the screen.
-	FVector ToWorld(const vc26::Vec3& V)
+	FString SavePath()
 	{
-		return FVector(V.x, -V.y, V.z) * MetresToCm;
+		return FPaths::ProjectSavedDir() / TEXT("VC26Career.sav");
 	}
 
 	const TCHAR* ReasonText(vc26::PointReason Reason)
@@ -72,113 +64,6 @@ AVC26Arena::AVC26Arena()
 	Camera->SetFieldOfView(65.f);  // GDD 1.1
 }
 
-UStaticMeshComponent* AVC26Arena::AddShape(UStaticMesh* Mesh, const FVector& CentreCm, const FVector& SizeCm, const FLinearColor& Color, bool bCastShadow)
-{
-	static UMaterialInterface* BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-
-	UStaticMeshComponent* Shape = NewObject<UStaticMeshComponent>(this);
-	Shape->SetMobility(EComponentMobility::Movable);
-	Shape->SetStaticMesh(Mesh);
-	Shape->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Shape->SetCastShadow(bCastShadow);
-	Shape->SetupAttachment(Root);
-	Shape->RegisterComponent();
-	Shape->SetWorldLocation(CentreCm);
-	Shape->SetWorldScale3D(SizeCm / 100.f);  // the engine's basic shapes are 1 m across
-
-	UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(BaseMaterial, this);
-	Material->SetVectorParameterValue(TEXT("Color"), Color);
-	Shape->SetMaterial(0, Material);
-	return Shape;
-}
-
-void AVC26Arena::AddLine(float X, float Y, float LengthX, float LengthY)
-{
-	AddShape(CubeMesh, FVector(X, -Y, 0.f) * MetresToCm + FVector(0, 0, 2.f), FVector(LengthX, LengthY, 0.01f) * MetresToCm, FLinearColor::White, false);
-}
-
-void AVC26Arena::BuildCourt()
-{
-	const float Length = vc26::kCourtHalfLength;
-	const float Width = vc26::kCourtHalfWidth;
-	const float LineWidth = 0.05f;
-
-	// Hall.
-	AddShape(CubeMesh, FVector(0, 0, -10.f), FVector(3400.f, 2200.f, 20.f), FLinearColor(0.03f, 0.22f, 0.3f), false);
-	const FLinearColor WallColor(0.1f, 0.12f, 0.18f);
-	AddShape(CubeMesh, FVector(1700.f, 0, 450.f), FVector(20.f, 2200.f, 900.f), WallColor, false);
-	AddShape(CubeMesh, FVector(-1700.f, 0, 450.f), FVector(20.f, 2200.f, 900.f), WallColor, false);
-	AddShape(CubeMesh, FVector(0, 1100.f, 450.f), FVector(3400.f, 20.f, 900.f), WallColor, false);
-	AddShape(CubeMesh, FVector(0, -1100.f, 450.f), FVector(3400.f, 20.f, 900.f), WallColor, false);
-
-	// Playing surface and lines.
-	AddShape(CubeMesh, FVector(0, 0, 0.5f), FVector(Length * 2.f, Width * 2.f, 0.01f) * MetresToCm, FLinearColor(0.75f, 0.35f, 0.1f), false);
-	AddLine(-Length, 0.f, LineWidth, Width * 2.f);
-	AddLine(Length, 0.f, LineWidth, Width * 2.f);
-	AddLine(0.f, Width, Length * 2.f, LineWidth);
-	AddLine(0.f, -Width, Length * 2.f, LineWidth);
-	AddLine(0.f, 0.f, LineWidth, Width * 2.f);
-	AddLine(-3.f, 0.f, LineWidth, Width * 2.f);
-	AddLine(3.f, 0.f, LineWidth, Width * 2.f);
-
-	// Net: a 1 m open mesh of thin strips, so the far team stays visible. The
-	// sim treats everything below the tape as net too.
-	const float NetTop = vc26::kNetHeight * MetresToCm;
-	const float NetWidth = Width * 2.f * MetresToCm;
-	const float PostY = (Width + 0.5f) * MetresToCm;
-	const FLinearColor MeshColor(0.02f, 0.02f, 0.02f);
-	for (float Y = -NetWidth / 2.f; Y <= NetWidth / 2.f; Y += 30.f)
-	{
-		AddShape(CubeMesh, FVector(0, Y, NetTop - 50.f), FVector(1.f, 1.5f, 100.f), MeshColor, false);
-	}
-	for (float Z = NetTop - 100.f; Z < NetTop; Z += 25.f)
-	{
-		AddShape(CubeMesh, FVector(0, 0, Z), FVector(1.f, NetWidth, 1.5f), MeshColor, false);
-	}
-	AddShape(CubeMesh, FVector(0, 0, NetTop - 100.f), FVector(2.f, NetWidth, 5.f), FLinearColor::White, false);
-	AddShape(CubeMesh, FVector(0, 0, NetTop - 3.f), FVector(3.f, NetWidth, 6.f), FLinearColor::White, false);
-	for (const float Y : {-PostY, PostY})
-	{
-		AddShape(CylinderMesh, FVector(0, Y, NetTop / 2.f), FVector(10.f, 10.f, NetTop), FLinearColor(0.6f, 0.6f, 0.65f));
-	}
-	for (const float Y : {-Width * MetresToCm, Width * MetresToCm})
-	{
-		AddShape(CylinderMesh, FVector(0, Y, NetTop + 20.f), FVector(2.f, 2.f, 180.f), FLinearColor(0.9f, 0.1f, 0.1f), false);
-	}
-
-	// Moving pieces.
-	for (int32 i = 0; i < 12; ++i)
-	{
-		Limbs.Add(AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f), i < 6 ? HomeColor : AwayColor));
-		Limbs.Add(AddShape(SphereMesh, FVector::ZeroVector, FVector(26.f), HeadColor));
-		for (int32 Limb = 0; Limb < 4; ++Limb)
-		{
-			Limbs.Add(AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f), HeadColor));
-		}
-	}
-	// Drawn a little larger than a real ball so it reads at a distance.
-	BallShape = AddShape(SphereMesh, FVector::ZeroVector, FVector(32.f), FLinearColor(1.f, 0.85f, 0.1f));
-	LandingMarker = AddShape(CylinderMesh, FVector::ZeroVector, FVector(240.f, 240.f, 1.f), FLinearColor(0.9f, 0.9f, 0.9f), false);
-	ControlledMarker = AddShape(CylinderMesh, FVector::ZeroVector, FVector(100.f, 100.f, 1.f), FLinearColor(1.f, 0.9f, 0.f), false);
-}
-
-void AVC26Arena::BuildLights()
-{
-	auto AddLight = [this](const FRotator& Direction, float Intensity, bool bShadows)
-	{
-		UDirectionalLightComponent* Light = NewObject<UDirectionalLightComponent>(this);
-		Light->SetMobility(EComponentMobility::Movable);
-		Light->ForwardShadingPriority = bShadows ? 1 : 0;
-		Light->SetupAttachment(Root);
-		Light->RegisterComponent();
-		Light->SetWorldRotation(Direction);
-		Light->SetIntensity(Intensity);
-		Light->SetCastShadows(bShadows);
-	};
-	AddLight(FRotator(-70.f, 30.f, 0.f), 1.6f, true);
-	AddLight(FRotator(-35.f, 200.f, 0.f), 0.6f, false);
-}
-
 void AVC26Arena::BeginPlay()
 {
 	Super::BeginPlay();
@@ -187,12 +72,283 @@ void AVC26Arena::BeginPlay()
 	SphereMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	CylinderMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 
+	BuildHall();
 	BuildCourt();
+	BuildCrowd();
+	BuildPlayers();
+	BuildBall();
 	BuildLights();
 	Sounds.Init();
+
 	// -VC26Touch shows the phone controls on PC, with the mouse as one finger.
 	bUseTouch = PLATFORM_ANDROID || PLATFORM_IOS || FParse::Param(FCommandLine::Get(), TEXT("VC26Touch"));
-	NewMatch();
+
+	// -VC26ShotDir=<folder> walks through every screen, saves a picture of each
+	// and quits. It never touches the real save.
+	FParse::Value(FCommandLine::Get(), TEXT("VC26ShotDir="), ShotDir);
+	bSkipSave = !ShotDir.IsEmpty();
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("VC26Autoplay")))
+	{
+		GoTo(EVC26Screen::Match);
+	}
+	StartBackgroundMatch();
+}
+
+void AVC26Arena::StartBackgroundMatch()
+{
+	vc26::RallySim::Config Config;
+	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
+	Config.humanHome = false;
+	Sim = MakeUnique<vc26::RallySim>(Config);
+	Stats = {};
+	bCareerMatch = false;
+	HomeName = TEXT("HOME");
+	AwayName = TEXT("AWAY");
+	Accumulator = 0.f;
+}
+
+void AVC26Arena::StartMatch(bool bCareer)
+{
+	vc26::RallySim::Config Config;
+	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
+	Config.humanHome = true;
+	Config.cpuSkill = CpuSkillLevels[Difficulty];
+	HomeName = TEXT("HOME");
+	AwayName = TEXT("AWAY");
+
+	if (bCareer && Career.IsSet())
+	{
+		Config.rules = vc26::Career::matchRules();
+		Config.cpuSkill = Career->opponentCpuSkill();
+		Config.humanSkills = Career->skills();
+		HomeName = UTF8_TO_TCHAR(Career->myTeam().name.c_str());
+		AwayName = UTF8_TO_TCHAR(Career->teams()[Career->nextOpponent()].name.c_str());
+	}
+
+	Sim = MakeUnique<vc26::RallySim>(Config);
+	Stats = {};
+	bCareerMatch = bCareer;
+	Accumulator = 0.f;
+	bCameraReady = false;
+	GoTo(EVC26Screen::Match);
+}
+
+void AVC26Arena::FinishMatch()
+{
+	if (!bCareerMatch || !Career.IsSet())
+	{
+		GoTo(EVC26Screen::MainMenu);
+		StartBackgroundMatch();
+		return;
+	}
+
+	const vc26::MatchScore& Score = Sim->score();
+	Report = Career->recordMatch(Score.sets(vc26::Team::Home), Score.sets(vc26::Team::Away), Stats);
+	SaveCareer();
+	GoTo(EVC26Screen::Report);
+	StartBackgroundMatch();
+}
+
+void AVC26Arena::LeaveMatch()
+{
+	// Leaving a career match doesn't count it, so it can be played again.
+	GoTo(bCareerMatch ? EVC26Screen::Hub : EVC26Screen::MainMenu);
+	StartBackgroundMatch();
+}
+
+void AVC26Arena::GoTo(EVC26Screen NewScreen)
+{
+	Screen = NewScreen;
+	MenuIndex = 0;
+}
+
+TArray<FString> AVC26Arena::GetMenuItems() const
+{
+	TArray<FString> Items;
+	switch (Screen)
+	{
+	case EVC26Screen::MainMenu:
+		if (HasSave())
+		{
+			Items.Add(TEXT("Continue Career"));
+		}
+		Items.Add(TEXT("New Career"));
+		Items.Add(TEXT("Quick Match"));
+		Items.Add(TEXT("Quit"));
+		break;
+	case EVC26Screen::Hub:
+		Items.Add(Career.IsSet() && Career->stage() == vc26::CareerStage::Final ? TEXT("Play the Final") : TEXT("Play Next Match"));
+		Items.Add(TEXT("Upgrade Skills"));
+		Items.Add(TEXT("Main Menu"));
+		break;
+	case EVC26Screen::Upgrades:
+		for (int32 i = 0; i < vc26::kSkills; ++i)
+		{
+			Items.Add(UTF8_TO_TCHAR(vc26::toString(static_cast<vc26::Skill>(i))));
+		}
+		Items.Add(TEXT("Back"));
+		break;
+	default:
+		break;
+	}
+	return Items;
+}
+
+void AVC26Arena::ConfirmMenu()
+{
+	const TArray<FString> Items = GetMenuItems();
+	const FString Choice = Items.IsValidIndex(MenuIndex) ? Items[MenuIndex] : FString();
+
+	switch (Screen)
+	{
+	case EVC26Screen::MainMenu:
+		if (Choice == TEXT("Continue Career") && LoadCareer())
+		{
+			GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
+		}
+		else if (Choice == TEXT("New Career"))
+		{
+			GoTo(EVC26Screen::CreatePlayer);
+		}
+		else if (Choice == TEXT("Quick Match"))
+		{
+			StartMatch(false);
+		}
+		else if (Choice == TEXT("Quit"))
+		{
+			FPlatformMisc::RequestExit(false, TEXT("VC26 menu"));
+		}
+		break;
+	case EVC26Screen::CreatePlayer:
+		Career.Emplace(std::string("The Rookie"), GetChosenArchetype(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
+		SaveCareer();
+		GoTo(EVC26Screen::Hub);
+		break;
+	case EVC26Screen::Hub:
+		if (MenuIndex == 0)
+		{
+			StartMatch(true);
+		}
+		else if (MenuIndex == 1)
+		{
+			GoTo(EVC26Screen::Upgrades);
+		}
+		else
+		{
+			GoTo(EVC26Screen::MainMenu);
+		}
+		break;
+	case EVC26Screen::Upgrades:
+		if (MenuIndex < vc26::kSkills)
+		{
+			if (Career->upgrade(static_cast<vc26::Skill>(MenuIndex)))
+			{
+				SaveCareer();
+			}
+		}
+		else
+		{
+			GoTo(EVC26Screen::Hub);
+		}
+		break;
+	case EVC26Screen::Report:
+		GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
+		break;
+	case EVC26Screen::SeasonEnd:
+		Career->startNextSeason();
+		SaveCareer();
+		GoTo(EVC26Screen::Hub);
+		break;
+	default:
+		break;
+	}
+}
+
+void AVC26Arena::UpdateMenus()
+{
+	const APlayerController* Player = Cast<APlayerController>(GetController());
+	if (!Player)
+	{
+		return;
+	}
+	auto Pressed = [Player](std::initializer_list<FKey> Keys)
+	{
+		for (const FKey& Key : Keys)
+		{
+			if (Player->WasInputKeyJustPressed(Key))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	const int32 Count = GetMenuItems().Num();
+	if (Count > 0 && Pressed({EKeys::Up, EKeys::W, EKeys::Gamepad_DPad_Up}))
+	{
+		MenuIndex = (MenuIndex + Count - 1) % Count;
+	}
+	if (Count > 0 && Pressed({EKeys::Down, EKeys::S, EKeys::Gamepad_DPad_Down}))
+	{
+		MenuIndex = (MenuIndex + 1) % Count;
+	}
+	if (Screen == EVC26Screen::CreatePlayer)
+	{
+		if (Pressed({EKeys::Left, EKeys::A, EKeys::Gamepad_DPad_Left}))
+		{
+			ChosenArchetype = (ChosenArchetype + vc26::kArchetypes - 1) % vc26::kArchetypes;
+		}
+		if (Pressed({EKeys::Right, EKeys::D, EKeys::Gamepad_DPad_Right}))
+		{
+			ChosenArchetype = (ChosenArchetype + 1) % vc26::kArchetypes;
+		}
+	}
+	if (Pressed({EKeys::Enter, EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom}))
+	{
+		ConfirmMenu();
+	}
+	else if (Pressed({EKeys::Escape, EKeys::Gamepad_FaceButton_Right}))
+	{
+		if (Screen == EVC26Screen::Upgrades)
+		{
+			GoTo(EVC26Screen::Hub);
+		}
+		else if (Screen == EVC26Screen::CreatePlayer)
+		{
+			GoTo(EVC26Screen::MainMenu);
+		}
+	}
+}
+
+void AVC26Arena::SaveCareer() const
+{
+	if (Career.IsSet() && !bSkipSave)
+	{
+		FFileHelper::SaveStringToFile(FString(UTF8_TO_TCHAR(Career->save().c_str())), *SavePath(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
+}
+
+bool AVC26Arena::HasSave() const
+{
+	return !bSkipSave && FPaths::FileExists(SavePath());
+}
+
+bool AVC26Arena::LoadCareer()
+{
+	FString Text;
+	if (!FFileHelper::LoadFileToString(Text, *SavePath()))
+	{
+		return false;
+	}
+	std::optional<vc26::Career> Loaded = vc26::Career::load(TCHAR_TO_UTF8(*Text));
+	if (!Loaded)
+	{
+		UE_LOG(LogVC26, Warning, TEXT("The career save could not be read"));
+		return false;
+	}
+	Career.Emplace(*Loaded);
+	return true;
 }
 
 const TCHAR* AVC26Arena::GetDifficultyName() const
@@ -205,17 +361,6 @@ void AVC26Arena::SetDifficulty(int32 Level)
 	Difficulty = Level;
 	Sim->setCpuSkill(CpuSkillLevels[Level]);
 	SetBanner(FString::Printf(TEXT("DIFFICULTY: %s"), GetDifficultyName()).ToUpper());
-}
-
-void AVC26Arena::NewMatch()
-{
-	vc26::RallySim::Config Config;
-	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
-	Config.humanHome = !FParse::Param(FCommandLine::Get(), TEXT("VC26Autoplay"));
-	Config.cpuSkill = CpuSkillLevels[Difficulty];
-	Sim = MakeUnique<vc26::RallySim>(Config);
-	Accumulator = 0.f;
-	bCameraReady = false;
 }
 
 void AVC26Arena::UpdateTouch()
@@ -250,7 +395,7 @@ void AVC26Arena::UpdateTouch()
 	int32 Height = 0;
 	Player->GetViewportSize(Width, Height);
 	Touch.update(Fingers.GetData(), Fingers.Num(), static_cast<float>(Width), static_cast<float>(Height));
-	if (Touch.difficultyTapped())
+	if (Touch.difficultyTapped() && !bCareerMatch)
 	{
 		SetDifficulty((Difficulty + 1) % 3);
 	}
@@ -292,21 +437,43 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	}
 
 	UpdateTouch();
-	const vc26::SimInput Input = ReadInput();
-	if (Sim->phase() == vc26::RallyPhase::MatchOver && Input.action)
+	const bool bInMatch = Screen == EVC26Screen::Match;
+	const APlayerController* Player = Cast<APlayerController>(GetController());
+
+	if (!bInMatch)
 	{
-		NewMatch();
+		UpdateMenus();
+	}
+	else if (Player)
+	{
+		if (Player->WasInputKeyJustPressed(EKeys::Escape))
+		{
+			LeaveMatch();
+		}
+		else if (Sim->humanHome() && !bCareerMatch)
+		{
+			const FKey LevelKeys[] = {EKeys::One, EKeys::Two, EKeys::Three};
+			for (int32 Level = 0; Level < 3; ++Level)
+			{
+				if (Player->WasInputKeyJustPressed(LevelKeys[Level]))
+				{
+					SetDifficulty(Level);
+				}
+			}
+		}
 	}
 
-	if (const APlayerController* Player = Cast<APlayerController>(GetController()))
+	const vc26::SimInput Input = Screen == EVC26Screen::Match ? ReadInput() : vc26::SimInput();
+	if (Sim->phase() == vc26::RallyPhase::MatchOver)
 	{
-		const FKey LevelKeys[] = {EKeys::One, EKeys::Two, EKeys::Three};
-		for (int32 Level = 0; Level < 3; ++Level)
+		if (Screen != EVC26Screen::Match || !Sim->humanHome())
 		{
-			if (Player->WasInputKeyJustPressed(LevelKeys[Level]))
-			{
-				SetDifficulty(Level);
-			}
+			StartBackgroundMatch();  // the match behind the menus just keeps going
+		}
+		else if (Player && (Player->WasInputKeyJustPressed(EKeys::SpaceBar) || Player->WasInputKeyJustPressed(EKeys::Enter) ||
+			Player->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom) || (bUseTouch && Touch.actionHeld())))
+		{
+			FinishMatch();
 		}
 	}
 
@@ -325,6 +492,11 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	UpdateCamera(DeltaSeconds);
 	Sounds.Tick(DeltaSeconds);
 	BannerTimeLeft = FMath::Max(BannerTimeLeft - DeltaSeconds, 0.f);
+
+	if (!ShotDir.IsEmpty())
+	{
+		RunScreenshotTour(DeltaSeconds);
+	}
 }
 
 void AVC26Arena::SetBanner(const FString& Text)
@@ -335,29 +507,38 @@ void AVC26Arena::SetBanner(const FString& Text)
 
 void AVC26Arena::HandleEvents()
 {
+	const bool bAudible = Screen == EVC26Screen::Match;
 	for (const vc26::SimEvent& Event : Sim->takeEvents())
 	{
+		vc26::recordEvent(Stats, Event);
+
 		switch (Event.type)
 		{
 		case vc26::SimEvent::Type::Contact:
+		{
+			EVC26Sound Sound = EVC26Sound::Set;
+			float Volume = 1.f;
+			float Pitch = 1.f;
+			EPose Swing = EPose::Set;
 			switch (Event.kind)
 			{
 			case vc26::ContactKind::Serve:
-				Sounds.Play(this, EVC26Sound::Spike, 0.6f, 1.2f);
-				Figures[Event.player].Swing = EPose::AttackSwing;
+				Sound = EVC26Sound::Spike;
+				Volume = 0.6f;
+				Pitch = 1.2f;
+				Swing = EPose::AttackSwing;
 				break;
 			case vc26::ContactKind::Pass:
-				Sounds.Play(this, EVC26Sound::Pass);
-				Figures[Event.player].Swing = EPose::Pass;
+				Sound = EVC26Sound::Pass;
+				Swing = EPose::Pass;
 				break;
 			case vc26::ContactKind::Set:
 			case vc26::ContactKind::FreeBall:
-				Sounds.Play(this, EVC26Sound::Set);
-				Figures[Event.player].Swing = EPose::Set;
 				break;
 			case vc26::ContactKind::Attack:
-				Sounds.Play(this, EVC26Sound::Spike, Event.quality == vc26::ContactQuality::Shank ? 0.5f : 1.f);
-				Figures[Event.player].Swing = EPose::AttackSwing;
+				Sound = EVC26Sound::Spike;
+				Volume = Event.quality == vc26::ContactQuality::Shank ? 0.5f : 1.f;
+				Swing = EPose::AttackSwing;
 				ShakeLeft = Event.quality == vc26::ContactQuality::Perfect ? 0.25f : 0.12f;
 				if (Event.quality == vc26::ContactQuality::Perfect && Event.team == vc26::Team::Home && Sim->humanHome())
 				{
@@ -365,11 +546,16 @@ void AVC26Arena::HandleEvents()
 				}
 				break;
 			case vc26::ContactKind::Block:
-				Sounds.Play(this, EVC26Sound::Block);
-				Figures[Event.player].Swing = EPose::Block;
+				Sound = EVC26Sound::Block;
+				Swing = EPose::Block;
 				break;
 			}
+			Figures[Event.player].Swing = Swing;
 			Figures[Event.player].SwingLeft = 0.28f;
+			if (bAudible)
+			{
+				Sounds.Play(this, Sound, Volume, Pitch);
+			}
 
 			if (Event.kind == vc26::ContactKind::Block)
 			{
@@ -380,6 +566,7 @@ void AVC26Arena::HandleEvents()
 				SetBanner(QualityText(Event.quality));
 			}
 			break;
+		}
 		case vc26::SimEvent::Type::Whiff:
 			if (Event.team == vc26::Team::Home && Sim->humanHome())
 			{
@@ -387,21 +574,27 @@ void AVC26Arena::HandleEvents()
 			}
 			break;
 		case vc26::SimEvent::Type::NetHit:
-			Sounds.Play(this, EVC26Sound::Net);
+			if (bAudible)
+			{
+				Sounds.Play(this, EVC26Sound::Net);
+			}
 			SetBanner(TEXT("NET"));
 			break;
 		case vc26::SimEvent::Type::Point:
 		{
-			if (Sim->ball().pos.z < 0.5f)
+			if (bAudible)
 			{
-				Sounds.Play(this, EVC26Sound::Floor);
+				if (Sim->ball().pos.z < 0.5f)
+				{
+					Sounds.Play(this, EVC26Sound::Floor);
+				}
+				Sounds.Play(this, EVC26Sound::Whistle, 0.35f);
+				// Long rallies get the bigger reaction (GDD 4).
+				Sounds.Play(this, EVC26Sound::Cheer, 0.25f + 0.5f * FMath::Min(Sim->contactsThisRally() / 12.f, 1.f));
 			}
-			Sounds.Play(this, EVC26Sound::Whistle, 0.35f);
-			// Long rallies get the bigger reaction (GDD 4).
-			Sounds.Play(this, EVC26Sound::Cheer, 0.25f + 0.5f * FMath::Min(Sim->contactsThisRally() / 12.f, 1.f));
+			SetBanner(FString::Printf(TEXT("%s  %s POINT"), ReasonText(Event.reason), Event.team == vc26::Team::Home ? *HomeName.ToUpper() : *AwayName.ToUpper()));
 
 			const vc26::MatchScore& Score = Sim->score();
-			SetBanner(FString::Printf(TEXT("%s  %s POINT"), ReasonText(Event.reason), Event.team == vc26::Team::Home ? TEXT("HOME") : TEXT("AWAY")));
 			UE_LOG(LogVC26, Log, TEXT("Point: %s %s | contacts %d | set %d | %d-%d"), Event.team == vc26::Team::Home ? TEXT("Home") : TEXT("Away"),
 				ReasonText(Event.reason), Sim->contactsThisRally(), Score.setNumber(), Score.points(vc26::Team::Home), Score.points(vc26::Team::Away));
 			break;
@@ -410,172 +603,71 @@ void AVC26Arena::HandleEvents()
 	}
 }
 
-AVC26Arena::EPose AVC26Arena::PoseFor(int32 Player) const
+void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 {
-	const vc26::BlockAttempt& Block = Sim->block();
-	if (Block.active && Block.player == Player && (Block.committed || Block.timeToContact < 0.6f))
+	TourTime += DeltaSeconds;
+	if (TourTime < 3.f)
 	{
-		return EPose::Block;
+		return;
 	}
+	TourTime = 0.f;
 
-	const vc26::PendingContact& Pending = Sim->pending();
-	if (Pending.active && Pending.player == Player && Pending.timeToContact < 0.55f)
+	auto Shot = [this](const TCHAR* Name)
 	{
-		if (Pending.touch == 1)
+		FScreenshotRequest::RequestScreenshot(ShotDir / FString(Name) + TEXT(".png"), true, false);
+		UE_LOG(LogVC26, Log, TEXT("Tour shot: %s"), Name);
+	};
+	auto DemoStats = []()
+	{
+		vc26::MatchStats Demo;
+		Demo.perfect = 22;
+		Demo.good = 14;
+		Demo.shanks = 4;
+		Demo.kills = 9;
+		Demo.aces = 2;
+		Demo.blocks = 1;
+		Demo.errors = 3;
+		Demo.clutchPoints = 2;
+		Demo.pointsWon = 30;
+		Demo.pointsLost = 20;
+		return Demo;
+	};
+
+	switch (TourStep++)
+	{
+	case 0: break;  // lets the first frames settle
+	case 1: Shot(TEXT("1_menu")); break;
+	case 2: GoTo(EVC26Screen::CreatePlayer); break;
+	case 3: Shot(TEXT("2_create")); break;
+	case 4:
+		Career.Emplace(std::string("The Rookie"), vc26::Archetype::PowerSpiker, 7u);
+		for (int32 i = 0; i < 3; ++i)
 		{
-			return EPose::Pass;
+			Career->recordMatch(2, i, DemoStats());
 		}
-		return Pending.touch == 3 && Pending.point.z >= 2.5f ? EPose::AttackWindUp : EPose::Set;
-	}
-
-	if (Sim->serveCharging() && Sim->server() == Player)
-	{
-		return EPose::ServeToss;
-	}
-	return Figures[Player].SwingLeft > 0.f ? Figures[Player].Swing : EPose::Idle;
-}
-
-void AVC26Arena::PlaceLimb(int32 Limb, const FVector& From, const FVector& To, float Thickness)
-{
-	const FVector Along = To - From;
-	Limbs[Limb]->SetWorldLocationAndRotation((From + To) / 2.f, FRotationMatrix::MakeFromZ(Along).Rotator());
-	Limbs[Limb]->SetWorldScale3D(FVector(Thickness / 100.f, Thickness / 100.f, Along.Size() / 100.f));
-}
-
-void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
-{
-	FFigure& Figure = Figures[Player];
-	const FVector Feet = ToWorld(Sim->players()[Player].pos);
-	const FVector Up = FVector::UpVector;
-
-	// Stride comes from how far the feet actually moved.
-	FVector Moved = Feet - Figure.LastFeet;
-	Moved.Z = 0.f;
-	Figure.LastFeet = Feet;
-	const float Speed = DeltaSeconds > 0.f ? Moved.Size() / DeltaSeconds : 0.f;
-	const FVector MoveDir = Moved.GetSafeNormal();
-	Figure.StridePhase += Moved.Size() * 0.035f;
-	Figure.RunAmount = FMath::FInterpTo(Figure.RunAmount, FMath::Clamp(Speed / 500.f, 0.f, 1.f), DeltaSeconds, 12.f);
-	Figure.SwingLeft = FMath::Max(Figure.SwingLeft - DeltaSeconds, 0.f);
-
-	// Turn to the ball, or the net when it's right overhead.
-	FVector ToBall = ToWorld(Sim->ball().pos) - Feet;
-	ToBall.Z = 0.f;
-	const FVector NetDirection(Player < 6 ? 1.f : -1.f, 0.f, 0.f);
-	const FVector WantedFacing = ToBall.Size() > 60.f ? ToBall.GetSafeNormal() : NetDirection;
-	Figure.Facing = (Figure.Facing + (WantedFacing - Figure.Facing) * FMath::Min(DeltaSeconds * 10.f, 1.f)).GetSafeNormal(UE_SMALL_NUMBER, NetDirection);
-	const FVector Forward = Figure.Facing;
-	const FVector Side = FVector::CrossProduct(Up, Forward);
-
-	const EPose Pose = PoseFor(Player);
-	const float Crouch = Pose == EPose::Pass ? 28.f : 0.f;
-	const FVector Hip = Feet + Up * (92.f - Crouch);
-	const FVector Neck = Feet + Up * (150.f - Crouch * 1.3f) + Forward * Crouch * 0.5f;
-	const FVector ShoulderL = Neck - Side * 22.f;
-	const FVector ShoulderR = Neck + Side * 22.f;
-
-	const float Swing = FMath::Sin(Figure.StridePhase) * Figure.RunAmount;
-	const float Lift = FMath::Max(FMath::Cos(Figure.StridePhase), 0.f) * Figure.RunAmount;
-	const float LiftOther = FMath::Max(-FMath::Cos(Figure.StridePhase), 0.f) * Figure.RunAmount;
-	const FVector FootL = Feet - Side * 14.f + MoveDir * Swing * 38.f + Up * (4.f + Lift * 16.f);
-	const FVector FootR = Feet + Side * 14.f - MoveDir * Swing * 38.f + Up * (4.f + LiftOther * 16.f);
-
-	FVector HandL = ShoulderL - Up * 62.f - Side * 6.f - MoveDir * Swing * 25.f;
-	FVector HandR = ShoulderR - Up * 62.f + Side * 6.f + MoveDir * Swing * 25.f;
-	switch (Pose)
-	{
-	case EPose::Idle:
+		GoTo(EVC26Screen::Hub);
 		break;
-	case EPose::Pass:
-		HandL = Feet + Up * 70.f + Forward * 55.f - Side * 5.f;
-		HandR = Feet + Up * 70.f + Forward * 55.f + Side * 5.f;
+	case 5: Shot(TEXT("3_hub")); break;
+	case 6: GoTo(EVC26Screen::Upgrades); break;
+	case 7: Shot(TEXT("4_upgrades")); break;
+	case 8:
+		Stats = DemoStats();
+		Report = Career->recordMatch(2, 1, Stats);
+		GoTo(EVC26Screen::Report);
 		break;
-	case EPose::Set:
-		HandL = Neck + Up * 48.f + Forward * 12.f - Side * 11.f;
-		HandR = Neck + Up * 48.f + Forward * 12.f + Side * 11.f;
+	case 9: Shot(TEXT("5_report")); break;
+	case 10:
+		while (Career->stage() != vc26::CareerStage::SeasonOver)
+		{
+			Career->recordMatch(2, 0, DemoStats());
+		}
+		GoTo(EVC26Screen::SeasonEnd);
 		break;
-	case EPose::AttackWindUp:
-		HandL = Neck + Up * 58.f + Forward * 18.f - Side * 18.f;
-		HandR = Neck + Up * 25.f - Forward * 38.f + Side * 24.f;
-		break;
-	case EPose::AttackSwing:
-		HandR = Neck + Forward * 62.f - Up * 18.f + Side * 10.f;
-		break;
-	case EPose::Block:
-		HandL = Neck + Up * 66.f + Forward * 8.f - Side * 15.f;
-		HandR = Neck + Up * 66.f + Forward * 8.f + Side * 15.f;
-		break;
-	case EPose::ServeToss:
-		HandL = Neck + Up * 56.f + Forward * 22.f - Side * 12.f;
-		HandR = Neck + Up * 22.f - Forward * 34.f + Side * 24.f;
-		break;
+	case 11: Shot(TEXT("6_season")); break;
+	case 12: StartBackgroundMatch(); GoTo(EVC26Screen::Match); break;
+	case 13: Shot(TEXT("7_match_a")); break;
+	case 14: Shot(TEXT("8_match_b")); break;
+	case 15: Shot(TEXT("9_match_c")); break;
+	default: FPlatformMisc::RequestExit(false, TEXT("VC26 screenshot tour")); break;
 	}
-
-	const int32 Base = Player * 6;
-	PlaceLimb(Base, Hip, Neck, 40.f);
-	Limbs[Base + 1]->SetWorldLocation(Neck + Up * 24.f);
-	PlaceLimb(Base + 2, ShoulderL, HandL, 12.f);
-	PlaceLimb(Base + 3, ShoulderR, HandR, 12.f);
-	PlaceLimb(Base + 4, Hip - Side * 11.f, FootL, 15.f);
-	PlaceLimb(Base + 5, Hip + Side * 11.f, FootR, 15.f);
-}
-
-void AVC26Arena::SyncShapes(float DeltaSeconds)
-{
-	const auto& Players = Sim->players();
-	for (int32 i = 0; i < 12; ++i)
-	{
-		AnimateFigure(i, DeltaSeconds);
-	}
-
-	BallShape->SetWorldLocation(ToWorld(Sim->ball().pos));
-
-	const FVector Controlled = ToWorld(Players[Sim->controlled()].pos);
-	ControlledMarker->SetVisibility(Sim->humanHome());
-	ControlledMarker->SetWorldLocation(FVector(Controlled.X, Controlled.Y, 3.f));
-
-	// Ground reticle (GDD 1.3): where the ball comes down, or where a serve is aimed.
-	const vc26::PendingContact& Pending = Sim->pending();
-	const bool bReceiving = Sim->humanHome() && Sim->hasLanding() && Pending.active && Pending.team == vc26::Team::Home;
-	const bool bAiming = Sim->humanServing();
-	const bool bBlocking = Sim->humanBlocking();
-	LandingMarker->SetVisibility(bReceiving || bAiming || bBlocking);
-	if (bBlocking)
-	{
-		// Marks the hitter's spot, so the player can line up on it.
-		const FVector Spot = ToWorld(Sim->block().attackPoint);
-		LandingMarker->SetWorldLocation(FVector(Spot.X, Spot.Y, 4.f));
-	}
-	else if (bReceiving)
-	{
-		const FVector Spot = ToWorld(Pending.point);
-		LandingMarker->SetWorldLocation(FVector(Spot.X, Spot.Y, 4.f));
-	}
-	else if (bAiming)
-	{
-		LandingMarker->SetWorldLocation(ToWorld(vc26::Vec3{6.f, Sim->serveAim(), 0.04f}));
-	}
-}
-
-void AVC26Arena::UpdateCamera(float DeltaSeconds)
-{
-	const FVector Focus = ToWorld(Sim->players()[Sim->controlled()].pos);
-	const FVector Ball = ToWorld(Sim->ball().pos);
-
-	// Behind the controlled player and looking past them towards the ball.
-	FVector Desired(FMath::Clamp(Focus.X - 700.f, -1550.f, -1000.f), Focus.Y * 0.6f, 560.f);
-	const FVector LookAt = FMath::Lerp(FVector(-50.f, Focus.Y * 0.5f, 70.f), Ball, 0.3f);
-	const FRotator DesiredRotation = (LookAt - Desired).Rotation();
-
-	if (!bCameraReady)
-	{
-		CameraPosition = Desired;
-		Camera->SetWorldRotation(DesiredRotation);
-		bCameraReady = true;
-	}
-	CameraPosition = FMath::VInterpTo(CameraPosition, Desired, DeltaSeconds, 3.f);
-	Camera->SetWorldRotation(FMath::RInterpTo(Camera->GetComponentRotation(), DesiredRotation, DeltaSeconds, 4.f));
-
-	ShakeLeft = FMath::Max(ShakeLeft - DeltaSeconds, 0.f);
-	Camera->SetWorldLocation(CameraPosition + FMath::VRand() * ShakeLeft * 30.f);
 }

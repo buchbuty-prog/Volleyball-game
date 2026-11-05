@@ -14,29 +14,80 @@ namespace
 	constexpr float BarLead = 0.9f;
 	constexpr float BarTail = 0.3f;
 
+	constexpr float TextScale = 1.3f;  // the engine's large font is small at 1080p
+
+	const FLinearColor Ink(0.02f, 0.03f, 0.07f, 0.93f);
+	const FLinearColor InkLight(0.08f, 0.1f, 0.17f, 0.96f);
+	const FLinearColor Gold(1.f, 0.8f, 0.15f);
+	const FLinearColor Muted(0.72f, 0.75f, 0.82f);
+	const FLinearColor HomeBlue(0.05f, 0.25f, 0.8f, 0.95f);
+	const FLinearColor AwayRed(0.72f, 0.08f, 0.08f, 0.95f);
+
 	float TimeToBar(float Seconds)
 	{
 		return (BarLead - Seconds) / (BarLead + BarTail);
 	}
+
+	FString Str(const char* Text)
+	{
+		return UTF8_TO_TCHAR(Text);
+	}
+
+	FString Str(const std::string& Text)
+	{
+		return UTF8_TO_TCHAR(Text.c_str());
+	}
+
+	const TCHAR* ArchetypeBlurb(vc26::Archetype Archetype)
+	{
+		switch (Archetype)
+		{
+		case vc26::Archetype::PowerSpiker: return TEXT("Heavy hitter. Best Attack, strong Serve.");
+		case vc26::Archetype::DefensiveAnchor: return TEXT("Keeps the ball alive. Best Pass, strong Block.");
+		case vc26::Archetype::PrecisionSetter: return TEXT("Runs the offence. Best Set, strong Pass.");
+		case vc26::Archetype::BlockSpecialist: return TEXT("Owns the net. Best Block, strong Attack.");
+		}
+		return TEXT("");
+	}
+}
+
+float AVC26Hud::Ui() const
+{
+	return Canvas->ClipY / 1080.f;
+}
+
+// Keeps the 1920-wide layout centred on windows of other shapes.
+float AVC26Hud::ScreenX(float X) const
+{
+	return (Canvas->ClipX - 1920.f * Ui()) / 2.f + X * Ui();
+}
+
+void AVC26Hud::Label(const FString& Text, float X, float Y, const FLinearColor& Color, float Size)
+{
+	DrawText(Text, Color, ScreenX(X), Y * Ui(), GEngine->GetLargeFont(), Size * TextScale * Ui());
+}
+
+void AVC26Hud::Panel(float X, float Y, float Width, float Height, const FLinearColor& Color)
+{
+	DrawRect(Color, ScreenX(X), Y * Ui(), Width * Ui(), Height * Ui());
 }
 
 void AVC26Hud::DrawCentred(const FString& Text, float Y, const FLinearColor& Color, float Size)
 {
 	UFont* Font = GEngine->GetLargeFont();
-	const float Scale = Size * Canvas->ClipY / 1080.f;
+	const float Scale = Size * TextScale * Ui();
 	float Width = 0.f;
 	float Height = 0.f;
 	GetTextSize(Text, Width, Height, Font, Scale);
-	DrawText(Text, Color, (Canvas->ClipX - Width) / 2.f, Y * Canvas->ClipY / 1080.f, Font, Scale);
+	DrawText(Text, Color, (Canvas->ClipX - Width) / 2.f, Y * Ui(), Font, Scale);
 }
 
 void AVC26Hud::DrawBar(float Y, float Marker, const TArray<FVector4f>& Zones)
 {
-	const float Ui = Canvas->ClipY / 1080.f;
-	const float Width = BarWidth * Ui;
+	const float Width = BarWidth * Ui();
 	const float Left = (Canvas->ClipX - Width) / 2.f;
-	const float Top = Y * Ui;
-	const float Height = BarHeight * Ui;
+	const float Top = Y * Ui();
+	const float Height = BarHeight * Ui();
 
 	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.7f), Left, Top, Width, Height);
 	// Each zone is x = start, y = end, z = green amount, w = red amount.
@@ -44,7 +95,7 @@ void AVC26Hud::DrawBar(float Y, float Marker, const TArray<FVector4f>& Zones)
 	{
 		DrawRect(FLinearColor(Zone.W, Zone.Z, 0.1f, 0.9f), Left + Zone.X * Width, Top, (Zone.Y - Zone.X) * Width, Height);
 	}
-	DrawRect(FLinearColor::White, Left + FMath::Clamp(Marker, 0.f, 1.f) * Width - 3.f * Ui, Top - 6.f * Ui, 6.f * Ui, Height + 12.f * Ui);
+	DrawRect(FLinearColor::White, Left + FMath::Clamp(Marker, 0.f, 1.f) * Width - 3.f * Ui(), Top - 6.f * Ui(), 6.f * Ui(), Height + 12.f * Ui());
 }
 
 void AVC26Hud::DrawCircle(float X, float Y, float Radius, const FLinearColor& Color, float Thickness)
@@ -77,6 +128,293 @@ void AVC26Hud::DrawTouchControls(const vc26::TouchControls& Touch)
 	DrawCircle(ButtonX, ButtonY, Radius * 0.42f, bHeld ? Lit : Rim, bHeld ? 6.f : 3.f);
 }
 
+void AVC26Hud::DrawMeter(float X, float Y, float Width, float Fill, const FLinearColor& Color)
+{
+	Panel(X, Y, Width, 14.f, FLinearColor(0.f, 0.f, 0.f, 0.6f));
+	Panel(X, Y, Width * FMath::Clamp(Fill, 0.f, 1.f), 14.f, Color);
+}
+
+void AVC26Hud::DrawItems(const AVC26Arena& Arena, float X, float Y, float Width)
+{
+	const TArray<FString> Items = Arena.GetMenuItems();
+	for (int32 i = 0; i < Items.Num(); ++i)
+	{
+		const bool bSelected = i == Arena.GetMenuIndex();
+		const float Top = Y + i * 66.f;
+		Panel(X, Top, Width, 56.f, bSelected ? Gold : Ink);
+		Label(Items[i], X + 22.f, Top + 12.f, bSelected ? FLinearColor(0.02f, 0.03f, 0.07f) : FLinearColor::White, 1.5f);
+	}
+}
+
+void AVC26Hud::DrawMainMenu(const AVC26Arena& Arena)
+{
+	Panel(0.f, 0.f, 620.f, 1080.f, Ink);
+	Panel(620.f, 0.f, 6.f, 1080.f, Gold);
+	Label(TEXT("VOLLEYBALL"), 60.f, 140.f, FLinearColor::White, 3.6f);
+	Label(TEXT("CAREER 26"), 60.f, 220.f, Gold, 3.6f);
+	DrawItems(Arena, 60.f, 400.f, 500.f);
+	Label(TEXT("Up / Down to choose, Enter to confirm"), 60.f, 980.f, Muted, 1.1f);
+}
+
+void AVC26Hud::DrawCreatePlayer(const AVC26Arena& Arena)
+{
+	const vc26::Archetype Chosen = Arena.GetChosenArchetype();
+	const vc26::Career Preview("", Chosen, 1);
+
+	Panel(460.f, 170.f, 1000.f, 740.f, Ink);
+	Panel(460.f, 170.f, 1000.f, 8.f, Gold);
+	DrawCentred(TEXT("CREATE YOUR PLAYER"), 210.f, FLinearColor::White, 2.2f);
+	DrawCentred(FString::Printf(TEXT("<   %s   >"), *Str(vc26::toString(Chosen))), 300.f, Gold, 2.4f);
+	DrawCentred(ArchetypeBlurb(Chosen), 380.f, Muted, 1.3f);
+
+	for (int32 i = 0; i < vc26::kSkills; ++i)
+	{
+		const float Y = 460.f + i * 62.f;
+		const int32 Value = Preview.skills()[i];
+		Label(Str(vc26::toString(static_cast<vc26::Skill>(i))), 560.f, Y, FLinearColor::White, 1.4f);
+		DrawMeter(760.f, Y + 14.f, 480.f, (Value - 40) / 59.f, Value > 55 ? Gold : FLinearColor(0.35f, 0.5f, 0.8f));
+		Label(FString::FromInt(Value), 1270.f, Y, FLinearColor::White, 1.4f);
+	}
+	DrawCentred(TEXT("Left / Right to choose, Enter to start your career"), 820.f, Muted, 1.2f);
+}
+
+void AVC26Hud::DrawTable(const vc26::Career& Career, float X, float Y)
+{
+	Panel(X, Y, 860.f, 590.f, Ink);
+	Label(TEXT("LEAGUE TABLE"), X + 24.f, Y + 18.f, Gold, 1.5f);
+	Label(TEXT("P"), X + 470.f, Y + 26.f, Muted, 1.f);
+	Label(TEXT("W"), X + 530.f, Y + 26.f, Muted, 1.f);
+	Label(TEXT("L"), X + 592.f, Y + 26.f, Muted, 1.f);
+	Label(TEXT("Sets"), X + 660.f, Y + 26.f, Muted, 1.f);
+	Label(TEXT("Pts"), X + 770.f, Y + 26.f, Muted, 1.f);
+
+	const auto Order = Career.standings();
+	for (int32 Row = 0; Row < vc26::Career::kTeams; ++Row)
+	{
+		const int32 Index = Order[Row];
+		const vc26::LeagueTeam& Team = Career.teams()[Index];
+		const float Top = Y + 76.f + Row * 62.f;
+		const bool bMine = Index == 0;
+		Panel(X + 12.f, Top, 836.f, 54.f, bMine ? FLinearColor(0.12f, 0.2f, 0.45f, 0.95f) : InkLight);
+		if (Row < 2)
+		{
+			Panel(X + 12.f, Top, 6.f, 54.f, Gold);  // final places
+		}
+		const FLinearColor Text = bMine ? FLinearColor::White : FLinearColor(0.88f, 0.9f, 0.95f);
+		Label(FString::Printf(TEXT("%d   %s"), Row + 1, *Str(Team.name)), X + 32.f, Top + 12.f, Text, 1.25f);
+		Label(FString::FromInt(Team.played), X + 470.f, Top + 14.f, Text, 1.15f);
+		Label(FString::FromInt(Team.won), X + 530.f, Top + 14.f, Text, 1.15f);
+		Label(FString::FromInt(Team.lost), X + 592.f, Top + 14.f, Text, 1.15f);
+		Label(FString::Printf(TEXT("%d-%d"), Team.setsFor, Team.setsAgainst), X + 660.f, Top + 14.f, Text, 1.15f);
+		Label(FString::FromInt(Team.points), X + 770.f, Top + 14.f, Gold, 1.25f);
+	}
+}
+
+void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
+{
+	Panel(0.f, 0.f, 1920.f, 130.f, Ink);
+	Panel(0.f, 130.f, 1920.f, 5.f, Gold);
+	Label(Str(Career.name()), 60.f, 26.f, FLinearColor::White, 2.2f);
+	Label(FString::Printf(TEXT("%s   |   Overall %d   |   %s"), *Str(vc26::toString(Career.archetype())), Career.overall(), *Str(Career.myTeam().name)), 60.f, 84.f, Muted, 1.2f);
+	Label(FString::Printf(TEXT("%s - Season %d"), *Str(vc26::toString(Career.tier())), Career.season()), 1260.f, 30.f, Gold, 1.6f);
+	const FString Progress = Career.stage() == vc26::CareerStage::Final ? FString(TEXT("The Final"))
+		: FString::Printf(TEXT("Round %d of %d"), Career.round() + 1, vc26::Career::kRounds);
+	Label(Progress, 1260.f, 84.f, Muted, 1.2f);
+
+	// Next match.
+	const vc26::LeagueTeam& Rival = Career.teams()[Career.nextOpponent()];
+	Panel(60.f, 180.f, 800.f, 200.f, Ink);
+	Label(TEXT("NEXT MATCH"), 84.f, 198.f, Gold, 1.3f);
+	Label(FString::Printf(TEXT("vs  %s"), *Str(Rival.name)), 84.f, 244.f, FLinearColor::White, 2.f);
+	Label(FString::Printf(TEXT("Strength %d   |   %d-%d this season"), Rival.strength, Rival.won, Rival.lost), 84.f, 318.f, Muted, 1.2f);
+
+	// Scouts.
+	Panel(60.f, 400.f, 800.f, 130.f, Ink);
+	Label(FString::Printf(TEXT("SCOUT INTEREST  %d%%"), Career.scoutInterest()), 84.f, 418.f, Gold, 1.3f);
+	DrawMeter(84.f, 468.f, 750.f, Career.scoutInterest() / 100.f, Gold);
+	Label(TEXT("Reach 100% to earn a move up, even without the title"), 84.f, 490.f, Muted, 1.f);
+
+	DrawItems(Arena, 60.f, 560.f, 800.f);
+	Label(FString::Printf(TEXT("Skill points: %d      Average rating: %.1f      Trophies: %d"), Career.skillPoints(), Career.averageRating(), Career.trophies()), 60.f, 780.f, FLinearColor::White, 1.2f);
+
+	DrawTable(Career, 1000.f, 180.f);
+}
+
+void AVC26Hud::DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career)
+{
+	Panel(360.f, 130.f, 1200.f, 820.f, Ink);
+	Panel(360.f, 130.f, 1200.f, 8.f, Gold);
+	DrawCentred(TEXT("UPGRADE SKILLS"), 164.f, FLinearColor::White, 2.2f);
+	DrawCentred(FString::Printf(TEXT("%d skill points to spend"), Career.skillPoints()), 240.f, Gold, 1.5f);
+
+	const TArray<FString> Items = Arena.GetMenuItems();
+	for (int32 i = 0; i < Items.Num(); ++i)
+	{
+		const float Y = 320.f + i * 92.f;
+		const bool bSelected = i == Arena.GetMenuIndex();
+		Panel(420.f, Y, 1080.f, 78.f, bSelected ? FLinearColor(0.2f, 0.17f, 0.04f, 0.95f) : InkLight);
+		if (bSelected)
+		{
+			Panel(420.f, Y, 8.f, 78.f, Gold);
+		}
+		Label(Items[i], 450.f, Y + 22.f, FLinearColor::White, 1.5f);
+		if (i < vc26::kSkills)
+		{
+			const vc26::Skill Skill = static_cast<vc26::Skill>(i);
+			const int32 Value = Career.skills()[i];
+			const int32 Cost = Career.upgradeCost(Skill);
+			DrawMeter(660.f, Y + 32.f, 500.f, (Value - 40) / 59.f, Gold);
+			Label(FString::FromInt(Value), 1190.f, Y + 20.f, FLinearColor::White, 1.6f);
+			Label(FString::Printf(TEXT("Cost %d"), Cost), 1300.f, Y + 24.f, Career.skillPoints() >= Cost ? Gold : Muted, 1.25f);
+		}
+	}
+}
+
+void AVC26Hud::DrawReport(const AVC26Arena& Arena, const vc26::Career& Career)
+{
+	const vc26::MatchReport& Report = Arena.GetReport();
+	const vc26::MatchStats& Stats = Arena.GetMatchStats();
+
+	Panel(360.f, 130.f, 1200.f, 820.f, Ink);
+	Panel(360.f, 130.f, 1200.f, 8.f, Report.won ? Gold : FLinearColor(0.6f, 0.1f, 0.1f));
+	DrawCentred(Report.won ? TEXT("VICTORY") : TEXT("DEFEAT"), 164.f, Report.won ? Gold : FLinearColor(0.95f, 0.4f, 0.35f), 3.f);
+	DrawCentred(FString::Printf(TEXT("Sets %d - %d"), Report.setsFor, Report.setsAgainst), 262.f, FLinearColor::White, 1.5f);
+
+	Label(TEXT("MATCH RATING"), 440.f, 340.f, Muted, 1.2f);
+	Label(FString::Printf(TEXT("%.1f"), Report.rating), 440.f, 380.f, Report.rating >= 7.f ? Gold : FLinearColor::White, 5.f);
+	Label(FString::Printf(TEXT("+%d skill points"), Report.skillPoints), 440.f, 540.f, FLinearColor::White, 1.4f);
+	Label(FString::Printf(TEXT("+%d scout interest"), Report.scoutGain), 440.f, 590.f, FLinearColor::White, 1.4f);
+	Label(FString::Printf(TEXT("League position: %d"), Career.leaguePosition()), 440.f, 640.f, FLinearColor::White, 1.4f);
+
+	const TPair<const TCHAR*, int32> Lines[] = {
+		{TEXT("Perfect touches"), Stats.perfect}, {TEXT("Good touches"), Stats.good}, {TEXT("Shanks"), Stats.shanks},
+		{TEXT("Kills"), Stats.kills}, {TEXT("Aces"), Stats.aces}, {TEXT("Stuff blocks"), Stats.blocks},
+		{TEXT("Clutch points"), Stats.clutchPoints}, {TEXT("Errors"), Stats.errors}};
+	for (int32 i = 0; i < UE_ARRAY_COUNT(Lines); ++i)
+	{
+		const float Y = 340.f + i * 52.f;
+		Label(Lines[i].Key, 900.f, Y, Muted, 1.3f);
+		Label(FString::FromInt(Lines[i].Value), 1380.f, Y, FLinearColor::White, 1.4f);
+	}
+	DrawCentred(TEXT("Press Enter to continue"), 870.f, Muted, 1.2f);
+}
+
+void AVC26Hud::DrawSeasonEnd(const vc26::Career& Career)
+{
+	Panel(360.f, 170.f, 1200.f, 740.f, Ink);
+	Panel(360.f, 170.f, 1200.f, 8.f, Gold);
+	DrawCentred(FString::Printf(TEXT("SEASON %d COMPLETE"), Career.season()), 210.f, FLinearColor::White, 2.4f);
+
+	const FString Headline = Career.wonFinal() ? FString(TEXT("CHAMPIONS!")) : FString::Printf(TEXT("Finished %d of %d"), Career.leaguePosition(), vc26::Career::kTeams);
+	DrawCentred(Headline, 320.f, Gold, 3.f);
+	DrawCentred(FString::Printf(TEXT("%s, %s"), *Str(Career.myTeam().name), *Str(vc26::toString(Career.tier()))), 430.f, Muted, 1.3f);
+	DrawCentred(FString::Printf(TEXT("Record %d-%d   |   Average rating %.1f   |   Trophies %d"), Career.myTeam().won, Career.myTeam().lost, Career.averageRating(), Career.trophies()), 500.f, FLinearColor::White, 1.4f);
+
+	FString Next = TEXT("Another season at this level. Go again.");
+	if (Career.promoted())
+	{
+		Next = Career.tier() == vc26::Tier::University ? TEXT("The National League has signed you!") : TEXT("You've been called up to the National Team!");
+	}
+	else if (Career.tier() == vc26::Tier::WorldStage && Career.wonFinal())
+	{
+		Next = TEXT("World champions. Defend your title next season.");
+	}
+	DrawCentred(Next, 620.f, Career.promoted() ? Gold : FLinearColor::White, 1.8f);
+	DrawCentred(TEXT("Press Enter for next season"), 820.f, Muted, 1.2f);
+}
+
+void AVC26Hud::DrawScoreBug(const AVC26Arena& Arena, const vc26::RallySim& Sim)
+{
+	using vc26::Team;
+	const vc26::MatchScore& Score = Sim.score();
+
+	const float Left = 40.f;
+	const float Top = 30.f;
+	auto Row = [&](float Y, const FString& Name, const FLinearColor& Color, Team Side)
+	{
+		Panel(Left, Y, 520.f, 50.f, Ink);
+		Panel(Left, Y, 10.f, 50.f, Color);
+		Label(Name, Left + 26.f, Y + 12.f, FLinearColor::White, 1.2f);
+		Label(FString::FromInt(Score.sets(Side)), Left + 410.f, Y + 12.f, Gold, 1.25f);
+		Panel(Left + 450.f, Y, 70.f, 50.f, Color);
+		Label(FString::FromInt(Score.points(Side)), Left + 464.f, Y + 8.f, FLinearColor::White, 1.6f);
+		if (Sim.servingTeam() == Side)
+		{
+			Panel(Left + 384.f, Y + 19.f, 12.f, 12.f, FLinearColor::White);
+		}
+	};
+	Row(Top, Arena.GetHomeName(), HomeBlue, Team::Home);
+	Row(Top + 54.f, Arena.GetAwayName(), AwayRed, Team::Away);
+}
+
+void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
+{
+	using vc26::Team;
+	DrawScoreBug(Arena, Sim);
+
+	const vc26::TouchControls* Touch = Arena.GetTouch();
+	const bool bTouch = Touch != nullptr;
+	if (!Arena.IsCareerMatch() && Sim.humanHome())
+	{
+		Label(FString::Printf(TEXT("%s  %s"), Arena.GetDifficultyName(), bTouch ? TEXT("(tap to change)") : TEXT("(1 Easy, 2 Normal, 3 Hard)")), 40.f, 150.f, Muted, bTouch ? 1.6f : 1.f);
+	}
+	if (bTouch)
+	{
+		DrawTouchControls(*Touch);
+	}
+
+	if (Arena.GetBannerTimeLeft() > 0.f)
+	{
+		DrawCentred(Arena.GetBanner(), 190.f, FLinearColor(1.f, 0.9f, 0.2f), 2.6f);
+	}
+
+	if (Sim.phase() == vc26::RallyPhase::MatchOver)
+	{
+		const bool bHomeWon = Sim.score().winner() == Team::Home;
+		DrawCentred(bHomeWon ? TEXT("YOU WIN THE MATCH") : TEXT("YOU LOST THE MATCH"), 440.f, FLinearColor::White, 3.f);
+		DrawCentred(bTouch ? TEXT("Tap the right side to continue") : TEXT("Press SPACE to continue"), 530.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.4f);
+		return;
+	}
+
+	if (!Sim.humanHome())
+	{
+		return;
+	}
+
+	if (Sim.humanServing())
+	{
+		DrawCentred(bTouch ? TEXT("Left thumb aims. Hold the right side, release in the green") : TEXT("A / D aim.  Hold SPACE, release in the green zone"), 930.f, FLinearColor::White, 1.3f);
+		if (Sim.serveCharging())
+		{
+			// Red below 0.2 nets the serve; above 0.85 it goes long.
+			DrawBar(980.f, Sim.serveGauge(), {FVector4f(0.f, 0.2f, 0.f, 0.8f), FVector4f(0.6f, 0.85f, 0.8f, 0.1f), FVector4f(0.85f, 1.f, 0.f, 0.8f)});
+		}
+		return;
+	}
+
+	const TArray<FVector4f> TimingZones = {
+		FVector4f(TimeToBar(0.30f), TimeToBar(-0.30f), 0.3f, 0.8f),
+		FVector4f(TimeToBar(0.15f), TimeToBar(-0.15f), 0.7f, 0.5f),
+		FVector4f(TimeToBar(0.06f), TimeToBar(-0.06f), 1.f, 0.1f)};
+
+	if (Sim.humanBlocking())
+	{
+		DrawCentred(bTouch ? TEXT("BLOCK: slide along the net, tap as the hitter strikes") : TEXT("BLOCK: A / D slides along the net, press SPACE as the hitter strikes"), 930.f, FLinearColor::White, 1.3f);
+		DrawBar(980.f, TimeToBar(Sim.block().timeToContact), TimingZones);
+		return;
+	}
+
+	const vc26::PendingContact& Pending = Sim.pending();
+	if (Sim.phase() == vc26::RallyPhase::InPlay && Pending.active && Pending.team == Team::Home)
+	{
+		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: get to the ring, tap on the mark") : TEXT("PASS: get to the ring, press SPACE on the mark"))
+			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb picks the hitter, tap on the mark") : TEXT("SET: A / D picks the hitter, press SPACE on the mark"))
+			: (bTouch ? TEXT("ATTACK: left thumb aims, tap on the mark") : TEXT("ATTACK: WASD aims, press SPACE on the mark"));
+		DrawCentred(Prompt, 930.f, FLinearColor::White, 1.3f);
+		DrawBar(980.f, TimeToBar(Pending.timeToContact), TimingZones);
+	}
+}
+
 void AVC26Hud::DrawHUD()
 {
 	Super::DrawHUD();
@@ -88,69 +426,21 @@ void AVC26Hud::DrawHUD()
 		return;
 	}
 
-	using vc26::Team;
-	const vc26::MatchScore& Score = Sim->score();
-
-	DrawCentred(FString::Printf(TEXT("HOME  %d  -  %d  AWAY"), Score.points(Team::Home), Score.points(Team::Away)), 24.f, FLinearColor::White, 2.2f);
-	DrawCentred(FString::Printf(TEXT("Sets %d - %d   |   Set %d"), Score.sets(Team::Home), Score.sets(Team::Away), Score.setNumber()), 80.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f);
-
-	const vc26::TouchControls* Touch = Arena->GetTouch();
-	const bool bTouch = Touch != nullptr;
-	DrawText(FString::Printf(TEXT("%s  %s"), Arena->GetDifficultyName(), bTouch ? TEXT("(tap to change)") : TEXT("(1 Easy, 2 Normal, 3 Hard)")), FLinearColor(0.75f, 0.75f, 0.75f),
-		16.f, 16.f, GEngine->GetLargeFont(), (bTouch ? 1.6f : 1.f) * Canvas->ClipY / 1080.f);
-	if (bTouch)
+	// Dims the arena behind the career screens so they stay readable.
+	if (Arena->GetScreen() != EVC26Screen::MainMenu && Arena->GetScreen() != EVC26Screen::Match)
 	{
-		DrawTouchControls(*Touch);
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), 0.f, 0.f, Canvas->ClipX, Canvas->ClipY);
 	}
 
-	if (Arena->GetBannerTimeLeft() > 0.f)
+	const vc26::Career* Career = Arena->GetCareer();
+	switch (Arena->GetScreen())
 	{
-		DrawCentred(Arena->GetBanner(), 190.f, FLinearColor(1.f, 0.9f, 0.2f), 2.6f);
-	}
-
-	if (Sim->phase() == vc26::RallyPhase::MatchOver)
-	{
-		const bool bHomeWon = Score.winner() == Team::Home;
-		DrawCentred(bHomeWon ? TEXT("YOU WIN THE MATCH") : TEXT("AWAY WINS THE MATCH"), 440.f, FLinearColor::White, 3.f);
-		DrawCentred(bTouch ? TEXT("Tap the right side for a new match") : TEXT("Press SPACE for a new match"), 530.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.4f);
-		return;
-	}
-
-	if (!Sim->humanHome())
-	{
-		return;
-	}
-
-	if (Sim->humanServing())
-	{
-		DrawCentred(bTouch ? TEXT("Left thumb aims. Hold the right side, release in the green") : TEXT("A / D aim.  Hold SPACE, release in the green zone"), 930.f, FLinearColor::White, 1.3f);
-		if (Sim->serveCharging())
-		{
-			// Red below 0.2 nets the serve; above 0.85 it goes long.
-			DrawBar(980.f, Sim->serveGauge(), {FVector4f(0.f, 0.2f, 0.f, 0.8f), FVector4f(0.6f, 0.85f, 0.8f, 0.1f), FVector4f(0.85f, 1.f, 0.f, 0.8f)});
-		}
-		return;
-	}
-
-	const TArray<FVector4f> TimingZones = {
-		FVector4f(TimeToBar(0.30f), TimeToBar(-0.30f), 0.3f, 0.8f),
-		FVector4f(TimeToBar(0.15f), TimeToBar(-0.15f), 0.7f, 0.5f),
-		FVector4f(TimeToBar(0.06f), TimeToBar(-0.06f), 1.f, 0.1f)};
-
-	if (Sim->humanBlocking())
-	{
-		DrawCentred(bTouch ? TEXT("BLOCK: slide along the net, tap as the hitter strikes") : TEXT("BLOCK: A / D slides along the net, press SPACE as the hitter strikes"), 930.f, FLinearColor::White, 1.3f);
-		DrawBar(980.f, TimeToBar(Sim->block().timeToContact), TimingZones);
-		return;
-	}
-
-	const vc26::PendingContact& Pending = Sim->pending();
-	if (Sim->phase() == vc26::RallyPhase::InPlay && Pending.active && Pending.team == Team::Home)
-	{
-		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: get to the ring, tap on the mark") : TEXT("PASS: get to the ring, press SPACE on the mark"))
-			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb picks the hitter, tap on the mark") : TEXT("SET: A / D picks the hitter, press SPACE on the mark"))
-			: (bTouch ? TEXT("ATTACK: left thumb aims, tap on the mark") : TEXT("ATTACK: WASD aims, press SPACE on the mark"));
-		DrawCentred(Prompt, 930.f, FLinearColor::White, 1.3f);
-		DrawBar(980.f, TimeToBar(Pending.timeToContact), TimingZones);
+	case EVC26Screen::MainMenu: DrawMainMenu(*Arena); break;
+	case EVC26Screen::CreatePlayer: DrawCreatePlayer(*Arena); break;
+	case EVC26Screen::Match: DrawMatch(*Arena, *Sim); break;
+	case EVC26Screen::Hub: if (Career) { DrawHub(*Arena, *Career); } break;
+	case EVC26Screen::Upgrades: if (Career) { DrawUpgrades(*Arena, *Career); } break;
+	case EVC26Screen::Report: if (Career) { DrawReport(*Arena, *Career); } break;
+	case EVC26Screen::SeasonEnd: if (Career) { DrawSeasonEnd(*Career); } break;
 	}
 }

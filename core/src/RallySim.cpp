@@ -108,6 +108,11 @@ Vec3 RallySim::scatter(float radius) {
     return {std::cos(angle) * r, std::sin(angle) * r, 0.f};
 }
 
+float RallySim::skillBoost(Team team, Skill skill) const {
+    if (!isHumanTeam(team)) return 0.f;
+    return static_cast<float>(config_.humanSkills[static_cast<int>(skill)] - 70) / 29.f;
+}
+
 float RallySim::serveGauge() const {
     if (!charging_) return 0.f;
     const float t = std::fmod(chargeTime_ / kGaugeHalfPeriod, 2.f);
@@ -222,7 +227,8 @@ void RallySim::serveCpu() {
 void RallySim::serveAt(Vec3 target, float netMargin) {
     charging_ = false;
     phase_ = RallyPhase::InPlay;
-    const float t = std::max(flightTimeClearingNet(ball_.pos, target, netMargin), 0.95f);
+    const float fastest = 0.95f - 0.12f * skillBoost(serving_, Skill::Serve);
+    const float t = std::max(flightTimeClearingNet(ball_.pos, target, netMargin), fastest);
     launch(serving_, serverIndex(), ContactKind::Serve, ContactQuality::Good, launchVelocity(ball_.pos, target, t));
 }
 
@@ -367,7 +373,8 @@ void RallySim::resolveBlock(Vec3 crossing) {
     const BlockAttempt attempt = block_;
     block_.active = false;
     if (!attempt.committed || lastKind_ != ContactKind::Attack) return;
-    if (std::fabs(crossing.y - players_[attempt.player].pos.y) > kBlockReach || crossing.z > kBlockTop) return;
+    const float reach = kBlockReach * (1.f + 0.3f * skillBoost(attempt.team, Skill::Block));
+    if (std::fabs(crossing.y - players_[attempt.player].pos.y) > reach || crossing.z > kBlockTop) return;
 
     const float own = sideSign(attempt.team);
     if (attempt.quality == ContactQuality::Shank) {
@@ -409,7 +416,8 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     Vec3 from = ball_.pos;
 
     if (contact.touch == 1) {
-        const Vec3 target = Vec3{own * 1.5f, 0.f, kSetHeight} + scatter(errorRadius(quality, 0.2f, 1.f, 3.2f));
+        const float accuracy = 1.f - 0.45f * skillBoost(team, Skill::Pass);
+        const Vec3 target = Vec3{own * 1.5f, 0.f, kSetHeight} + scatter(errorRadius(quality, 0.2f, 1.f, 3.2f) * accuracy);
         const float apex = quality == ContactQuality::Shank ? 3.f + rand01() * 2.5f : 4.3f;
         launch(team, contact.player, ContactKind::Pass, quality, launchVelocity(from, target, flightTimeForApex(from, target, apex)));
         return;
@@ -418,7 +426,8 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     if (contact.touch == 2) {
         float across = (static_cast<int>(rand01() * 3.f) - 1) * 3.2f;
         if (human) across = std::fabs(aim.moveY) > 0.3f ? (aim.moveY > 0.f ? 3.2f : -3.2f) : 0.f;
-        const Vec3 target = Vec3{own * 1.f, across, kAttackHeight} + scatter(errorRadius(quality, 0.1f, 0.5f, 1.8f));
+        const float accuracy = 1.f - 0.45f * skillBoost(team, Skill::Set);
+        const Vec3 target = Vec3{own * 1.f, across, kAttackHeight} + scatter(errorRadius(quality, 0.1f, 0.5f, 1.8f) * accuracy);
         launch(team, contact.player, ContactKind::Set, quality, launchVelocity(from, target, flightTimeForApex(from, target, 4.6f)));
         return;
     }
@@ -463,7 +472,7 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
 
     const Vec3 target = Vec3{-own * depth, across, kBallRadius} + scatter(errorRadius(quality, 0.2f, 0.7f, 2.2f));
     float speed = quality == ContactQuality::Perfect ? 18.f : quality == ContactQuality::Good ? 14.f : 10.f;
-    if (!human) speed *= 1.f + (config_.cpuSkill - 0.7f) * 0.6f;
+    speed *= human ? 1.f + 0.2f * skillBoost(team, Skill::Attack) : 1.f + (config_.cpuSkill - 0.7f) * 0.6f;
     const float margin = quality == ContactQuality::Shank && rand01() < 0.4f ? -0.4f : 0.08f;
     const float t = std::max(flatDistance(from, target) / speed, flightTimeClearingNet(from, target, margin));
     launch(team, contact.player, ContactKind::Attack, quality, launchVelocity(from, target, t));
@@ -550,6 +559,7 @@ void RallySim::endRally(Team winner, PointReason reason) {
     hasLanding_ = false;
     ball_.vel = {ball_.vel.x * 0.5f, ball_.vel.y * 0.5f, ball_.pos.z <= kBallRadius ? std::fabs(ball_.vel.z) * 0.55f : ball_.vel.z};
 
+    const bool clutch = score_.setPointFor().has_value();
     score_.awardPoint(winner);
     rotation_[0]->onRallyEnd(winner == Team::Home);
     rotation_[1]->onRallyEnd(winner == Team::Away);
@@ -558,6 +568,7 @@ void RallySim::endRally(Team winner, PointReason reason) {
     e.type = SimEvent::Type::Point;
     e.team = winner;
     e.reason = reason;
+    e.clutch = clutch;
     events_.push_back(e);
 }
 

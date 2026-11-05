@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "vc26/Ball.h"
+#include "vc26/Career.h"
 #include "vc26/MatchScore.h"
 #include "vc26/RallySim.h"
 #include "vc26/RoleFit.h"
@@ -466,15 +467,15 @@ TEST(timing_windows_grade_early_and_late_alike) {
 
 namespace {
 
-struct MatchStats {
+struct SimTally {
     int points = 0, contacts = 0, longest = 0, aces = 0, kills = 0, faults = 0, homeWins = 0;
     std::vector<int> log;
 };
 
 // Plays until the match ends or `maxPoints` rallies have finished.
 template <typename Driver>
-MatchStats playMatch(RallySim& sim, Driver driver, int maxPoints = 100000) {
-    MatchStats st;
+SimTally playMatch(RallySim& sim, Driver driver, int maxPoints = 100000) {
+    SimTally st;
     for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver && st.points < maxPoints; ++i) {
         const int contacts = sim.contactsThisRally();
         sim.step(kDt, driver(sim));
@@ -537,13 +538,13 @@ struct ScriptedHuman {
 }  // namespace
 
 TEST(cpu_matches_finish_with_a_legal_result) {
-    MatchStats total;
+    SimTally total;
     for (std::uint32_t seed = 1; seed <= 30; ++seed) {
         RallySim::Config c;
         c.seed = seed;
         c.humanHome = false;
         RallySim sim(c);
-        const MatchStats st = playMatch(sim, noInput);
+        const SimTally st = playMatch(sim, noInput);
         CHECK(sim.phase() == RallyPhase::MatchOver);
         CHECK(sim.score().finished());
         const Team w = *sim.score().winner();
@@ -585,7 +586,7 @@ TEST(idle_human_gives_the_points_away) {
     RallySim sim(c);
     // Serves when it has to, then never touches the ball.
     bool held = false;
-    const MatchStats st = playMatch(sim, [&held](const RallySim& s) {
+    const SimTally st = playMatch(sim, [&held](const RallySim& s) {
         SimInput in;
         if (s.humanServing()) {
             held = !held;
@@ -603,7 +604,7 @@ TEST(well_timed_human_beats_the_cpu) {
         RallySim::Config c;
         c.seed = seed;
         RallySim sim(c);
-        const MatchStats st = playMatch(sim, ScriptedHuman{});
+        const SimTally st = playMatch(sim, ScriptedHuman{});
         CHECK(sim.phase() == RallyPhase::MatchOver);
         CHECK(st.longest >= 5);
         won += sim.score().winner() == Team::Home;
@@ -618,8 +619,8 @@ TEST(late_human_plays_worse_than_on_time_human) {
         RallySim::Config c;
         c.seed = seed;
         RallySim good(c), bad(c);
-        const MatchStats g = playMatch(good, ScriptedHuman{0.f}, 150);
-        const MatchStats b = playMatch(bad, ScriptedHuman{-0.25f}, 150);
+        const SimTally g = playMatch(good, ScriptedHuman{0.f}, 150);
+        const SimTally b = playMatch(bad, ScriptedHuman{-0.25f}, 150);
         onTime += g.homeWins;
         onPoints += g.points;
         late += b.homeWins;
@@ -724,7 +725,7 @@ TEST(higher_cpu_skill_is_harder_to_beat) {
             ScriptedHuman player;  // human-like: slightly off, and slow off the mark
             player.pressAt = 0.1f;
             player.reaction = 0.35f;
-            const MatchStats st = playMatch(sim, player, 150);
+            const SimTally st = playMatch(sim, player, 150);
             won += st.homeWins;
             points += st.points;
         }
@@ -744,7 +745,7 @@ TEST(being_late_hurts_but_stays_playable) {
             RallySim::Config c;
             c.seed = seed;
             RallySim sim(c);
-            const MatchStats st = playMatch(sim, ScriptedHuman{pressAt}, 150);
+            const SimTally st = playMatch(sim, ScriptedHuman{pressAt}, 150);
             won += st.homeWins;
             points += st.points;
         }
@@ -771,6 +772,189 @@ TEST(dead_ball_bounces_and_comes_to_rest_on_the_floor) {
         CHECK(sim.ball().pos.z >= kBallRadius);
     }
     CHECK(sawPointOver && peak > 0.2f);
+}
+
+// --- Career -----------------------------------------------------------------
+
+namespace {
+
+MatchStats strongGame() {
+    MatchStats s;
+    s.perfect = 30;
+    s.good = 10;
+    s.kills = 12;
+    s.aces = 2;
+    s.pointsWon = 30;
+    s.pointsLost = 12;
+    s.clutchPoints = 3;
+    return s;
+}
+
+MatchStats poorGame() {
+    MatchStats s;
+    s.good = 5;
+    s.shanks = 12;
+    s.whiffs = 6;
+    s.errors = 8;
+    s.pointsWon = 12;
+    s.pointsLost = 30;
+    return s;
+}
+
+// Wins every match; the final counts too.
+void winSeason(Career& c) {
+    while (c.stage() != CareerStage::SeasonOver) c.recordMatch(2, 0, strongGame());
+}
+
+}  // namespace
+
+TEST(league_points_follow_the_set_score) {
+    CHECK(leaguePoints(2, 0) == 3);
+    CHECK(leaguePoints(2, 1) == 2);
+    CHECK(leaguePoints(1, 2) == 1);
+    CHECK(leaguePoints(0, 2) == 0);
+}
+
+TEST(better_games_rate_higher_within_the_scale) {
+    const float good = matchRating(strongGame(), true), bad = matchRating(poorGame(), false);
+    std::printf("  strong game %.1f, poor game %.1f\n", static_cast<double>(good), static_cast<double>(bad));
+    CHECK(good > 8.f && good <= 10.f);
+    CHECK(bad >= 1.f && bad < 5.f);
+    CHECK(matchRating(strongGame(), true) > matchRating(strongGame(), false));
+}
+
+TEST(archetypes_start_strong_in_their_specialty) {
+    Career spiker("A", Archetype::PowerSpiker, 1), anchor("B", Archetype::DefensiveAnchor, 1);
+    CHECK(spiker.skills()[static_cast<int>(Skill::Attack)] > spiker.skills()[static_cast<int>(Skill::Pass)]);
+    CHECK(anchor.skills()[static_cast<int>(Skill::Pass)] > anchor.skills()[static_cast<int>(Skill::Attack)]);
+    CHECK(spiker.overall() == anchor.overall());
+}
+
+TEST(everyone_plays_everyone_once_a_season) {
+    Career c("A", Archetype::PowerSpiker, 3);
+    std::vector<int> seen;
+    for (int r = 0; r < Career::kRounds; ++r) {
+        seen.push_back(c.nextOpponent());
+        c.recordMatch(r % 2 ? 2 : 0, r % 2 ? 1 : 2, strongGame());
+    }
+    std::sort(seen.begin(), seen.end());
+    CHECK((seen == std::vector<int>{1, 2, 3, 4, 5, 6, 7}));
+
+    int wins = 0, losses = 0, setsFor = 0, setsAgainst = 0;
+    for (const LeagueTeam& t : c.teams()) {
+        CHECK(t.played == Career::kRounds);
+        wins += t.won;
+        losses += t.lost;
+        setsFor += t.setsFor;
+        setsAgainst += t.setsAgainst;
+    }
+    CHECK(wins == losses && wins == 28);
+    CHECK(setsFor == setsAgainst);
+}
+
+TEST(winning_the_final_promotes_up_to_the_world_stage) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    winSeason(c);
+    CHECK(c.wonFinal() && c.promoted() && c.trophies() == 1);
+    c.startNextSeason();
+    CHECK(c.tier() == Tier::NationalLeague && c.season() == 2 && c.round() == 0 && c.scoutInterest() == 0);
+    CHECK(c.myTeam().played == 0);
+    winSeason(c);
+    c.startNextSeason();
+    CHECK(c.tier() == Tier::WorldStage);
+    winSeason(c);
+    CHECK(c.trophies() == 3 && !c.promoted());
+    c.startNextSeason();
+    CHECK(c.tier() == Tier::WorldStage);
+}
+
+TEST(a_bad_season_ends_without_a_final_or_promotion) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    for (int r = 0; r < Career::kRounds; ++r) c.recordMatch(0, 2, poorGame());
+    CHECK(c.stage() == CareerStage::SeasonOver && c.leaguePosition() > 2);
+    CHECK(!c.promoted() && c.trophies() == 0);
+    c.startNextSeason();
+    CHECK(c.tier() == Tier::University);
+}
+
+TEST(great_form_can_earn_promotion_without_the_title) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    MatchStats s = strongGame();
+    while (c.stage() == CareerStage::League) c.recordMatch(2, 0, s);
+    CHECK(c.stage() == CareerStage::Final && c.scoutInterest() == 100);
+    c.recordMatch(0, 2, s);  // loses the final, but the scouts have seen enough
+    CHECK(!c.wonFinal() && c.promoted());
+}
+
+TEST(upgrades_spend_points_and_get_dearer) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    CHECK(!c.upgrade(Skill::Serve));  // nothing to spend yet
+    while (c.skillPoints() < 20 && c.stage() != CareerStage::SeasonOver) c.recordMatch(2, 0, strongGame());
+    const int before = c.skillPoints(), cost = c.upgradeCost(Skill::Serve), value = c.skills()[0];
+    CHECK(c.upgrade(Skill::Serve));
+    CHECK(c.skillPoints() == before - cost && c.skills()[0] == value + 1);
+    CHECK(c.upgradeCost(Skill::Attack) >= c.upgradeCost(Skill::Serve));
+}
+
+TEST(a_saved_career_comes_back_identical) {
+    Career c("Dana Levi", Archetype::BlockSpecialist, 9);
+    for (int r = 0; r < 3; ++r) c.recordMatch(2, 1, strongGame());
+    c.upgrade(Skill::Block);
+    const std::optional<Career> back = Career::load(c.save());
+    CHECK(back.has_value());
+    if (!back) return;
+    CHECK(back->name() == "Dana Levi" && back->archetype() == Archetype::BlockSpecialist);
+    CHECK(back->skills() == c.skills() && back->round() == 3 && back->skillPoints() == c.skillPoints());
+    CHECK(back->teams()[3].name == c.teams()[3].name && back->teams()[3].points == c.teams()[3].points);
+    CHECK(back->save() == c.save());
+
+    Career a = *back, b = c;  // same future too
+    a.recordMatch(2, 0, strongGame());
+    b.recordMatch(2, 0, strongGame());
+    CHECK(a.save() == b.save());
+
+    CHECK(!Career::load("not a save"));
+    CHECK(!Career::load(c.save().substr(0, 60)));
+}
+
+TEST(career_tracks_a_real_match_from_sim_events) {
+    RallySim::Config cfg;
+    cfg.rules = Career::matchRules();
+    cfg.seed = 11;
+    RallySim sim(cfg);
+    MatchStats stats;
+    ScriptedHuman player;
+    for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+        sim.step(kDt, player(sim));
+        for (const SimEvent& e : sim.takeEvents()) recordEvent(stats, e);
+    }
+    CHECK(sim.phase() == RallyPhase::MatchOver);
+    const int setPoints = sim.score().sets(Team::Home) + sim.score().sets(Team::Away);
+    CHECK(setPoints >= 2 && setPoints <= 3);
+    CHECK(stats.pointsWon >= 30 && stats.perfect > 0 && stats.clutchPoints > 0);
+    CHECK(stats.kills + stats.aces + stats.blocks <= stats.pointsWon);
+}
+
+TEST(better_skills_win_more) {
+    auto homeShare = [](int rating) {
+        int won = 0, points = 0;
+        for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+            RallySim::Config c;
+            c.seed = seed;
+            c.humanSkills.fill(rating);
+            RallySim sim(c);
+            ScriptedHuman player;
+            player.pressAt = 0.12f;
+            player.reaction = 0.35f;
+            const SimTally st = playMatch(sim, player, 150);
+            won += st.homeWins;
+            points += st.points;
+        }
+        return static_cast<float>(won) / static_cast<float>(points);
+    };
+    const float rookie = homeShare(45), star = homeShare(95);
+    std::printf("  rookie wins %.0f%% of points, star %.0f%%\n", static_cast<double>(rookie * 100.f), static_cast<double>(star * 100.f));
+    CHECK(star > rookie + 0.04f);
 }
 
 // --- Touch controls ---------------------------------------------------------

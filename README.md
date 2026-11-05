@@ -26,6 +26,8 @@ Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run 
 
 You control whichever Home player the ball is going to, or your nearest front-row blocker when the opponent attacks. Sets and attacks position the player for you.
 
+The main menu has **New Career**, **Continue Career** and **Quick Match**. In a career you pick an archetype, play an eight-team league and a final, spend skill points, and climb from the University Circuit to the World Stage. Press Esc to leave a match without it counting. Careers save to `game/Saved/VC26Career.sav`.
+
 ## Build & test
 
 ```sh

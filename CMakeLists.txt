@@ -13,6 +13,7 @@ add_library(vc26_core
     core/src/RallySim.cpp
     core/src/ServeFlight.cpp
     core/src/TouchControls.cpp
+    core/src/Career.cpp
 )
 target_include_directories(vc26_core PUBLIC core/include)
 if(MSVC)

@@ -1,11 +1,14 @@
-// Draws a vc26::RallySim and feeds it input. All the gameplay lives in core/;
-// the court, players and ball here are placeholder shapes built at runtime, so
-// the prototype needs no content assets.
+// The game's stage: runs the menus and career, drives a vc26::RallySim and draws
+// it. All the rules live in core/. The hall, crowd and players are built from
+// engine shapes at runtime, so the prototype needs no content assets.
+// VC26Arena.cpp holds the flow, VC26ArenaVisuals.cpp the drawing.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "Templates/UniquePtr.h"
 #include "VC26Sounds.h"
+#include "vc26/Career.h"
 #include "vc26/RallySim.h"
 #include "vc26/TouchControls.h"
 #include "VC26Arena.generated.h"
@@ -13,6 +16,18 @@
 class UCameraComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UTextRenderComponent;
+
+enum class EVC26Screen : uint8
+{
+	MainMenu,
+	CreatePlayer,
+	Hub,
+	Upgrades,
+	Match,
+	Report,
+	SeasonEnd
+};
 
 UCLASS()
 class AVC26Arena : public APawn
@@ -31,35 +46,67 @@ public:
 	const TCHAR* GetDifficultyName() const;
 	const vc26::TouchControls* GetTouch() const { return bUseTouch ? &Touch : nullptr; }
 
+	EVC26Screen GetScreen() const { return Screen; }
+	int32 GetMenuIndex() const { return MenuIndex; }
+	TArray<FString> GetMenuItems() const;
+	const vc26::Career* GetCareer() const { return Career.IsSet() ? &Career.GetValue() : nullptr; }
+	const vc26::MatchReport& GetReport() const { return Report; }
+	const vc26::MatchStats& GetMatchStats() const { return Stats; }
+	vc26::Archetype GetChosenArchetype() const { return static_cast<vc26::Archetype>(ChosenArchetype); }
+	bool IsCareerMatch() const { return bCareerMatch; }
+	const FString& GetHomeName() const { return HomeName; }
+	const FString& GetAwayName() const { return AwayName; }
+
 private:
 	enum class EPose : uint8 { Idle, Pass, Set, AttackWindUp, AttackSwing, Block, ServeToss };
 
-	// Per-player animation state. The shapes themselves live in Limbs.
+	// Per-player animation state. The shapes themselves live in Parts.
 	struct FFigure
 	{
 		FVector LastFeet = FVector::ZeroVector;
 		FVector Facing = FVector::ForwardVector;
 		float StridePhase = 0.f;
 		float RunAmount = 0.f;
+		float Height = 1.f;
 		EPose Swing = EPose::Idle;  // held briefly after touching the ball
 		float SwingLeft = 0.f;
 	};
 
-	UStaticMeshComponent* AddShape(UStaticMesh* Mesh, const FVector& CentreCm, const FVector& SizeCm, const FLinearColor& Color, bool bCastShadow = true);
-	void AddLine(float X, float Y, float LengthX, float LengthY);
-	void BuildCourt();
-	void BuildLights();
-	void NewMatch();
+	// Flow (VC26Arena.cpp).
+	void StartBackgroundMatch();
+	void StartMatch(bool bCareer);
+	void FinishMatch();
+	void LeaveMatch();
+	void GoTo(EVC26Screen NewScreen);
+	void UpdateMenus();
+	void ConfirmMenu();
+	void SaveCareer() const;
+	bool LoadCareer();
+	bool HasSave() const;
 	void UpdateTouch();
 	vc26::SimInput ReadInput() const;
 	void HandleEvents();
+	void SetBanner(const FString& Text);
+	void SetDifficulty(int32 Level);
+	void RunScreenshotTour(float DeltaSeconds);
+
+	// Drawing (VC26ArenaVisuals.cpp).
+	UStaticMeshComponent* AddShape(UStaticMesh* Mesh, const FVector& CentreCm, const FVector& SizeCm, const FLinearColor& Color, bool bCastShadow = true);
+	void AddLine(float X, float Y, float LengthX, float LengthY);
+	void AddBoard(const FVector& Centre, const FVector& Size, const FRotator& TextFacing);
+	void AddCrowdBlock(const FVector& Start, const FVector& AlongRow, const FVector& OutwardStep, int32 Seats);
+	void BuildHall();
+	void BuildCourt();
+	void BuildCrowd();
+	void BuildPlayers();
+	void BuildBall();
+	void BuildLights();
 	void SyncShapes(float DeltaSeconds);
 	EPose PoseFor(int32 Player) const;
 	void AnimateFigure(int32 Player, float DeltaSeconds);
-	void PlaceLimb(int32 Limb, const FVector& From, const FVector& To, float Thickness);
-	void SetDifficulty(int32 Level);
+	void PlaceBone(int32 Part, const FVector& From, const FVector& To, float Thickness);
+	void UpdateBall(float DeltaSeconds);
 	void UpdateCamera(float DeltaSeconds);
-	void SetBanner(const FString& Text);
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> Root;
@@ -76,12 +123,18 @@ private:
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> CylinderMesh;
 
-	// Six per player: torso, head, two arms, two legs.
+	// EPart::Count shapes per player.
 	UPROPERTY()
-	TArray<TObjectPtr<UStaticMeshComponent>> Limbs;
+	TArray<TObjectPtr<UStaticMeshComponent>> Parts;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> Numbers;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> BallShape;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> Trail;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> LandingMarker;
@@ -90,15 +143,32 @@ private:
 	TObjectPtr<UStaticMeshComponent> ControlledMarker;
 
 	TUniquePtr<vc26::RallySim> Sim;
+	TOptional<vc26::Career> Career;
+	vc26::MatchStats Stats;
+	vc26::MatchReport Report;
+	EVC26Screen Screen = EVC26Screen::MainMenu;
+	int32 MenuIndex = 0;
+	int32 ChosenArchetype = 0;
+	bool bCareerMatch = false;
+	FString HomeName = TEXT("HOME");
+	FString AwayName = TEXT("AWAY");
+
 	float Accumulator = 0.f;
 	FString Banner;
 	float BannerTimeLeft = 0.f;
 	bool bCameraReady = false;
 	FVector CameraPosition = FVector::ZeroVector;
+	float OrbitAngle = 0.f;
 	float ShakeLeft = 0.f;
 	float SlowMoLeft = 0.f;
+	float BallSpin = 0.f;
+	TArray<FVector> TrailPoints;
 	int32 Difficulty = 1;  // 0 easy, 1 normal, 2 hard
 	bool bUseTouch = false;
+	bool bSkipSave = false;
+	FString ShotDir;
+	float TourTime = 0.f;
+	int32 TourStep = 0;
 	vc26::TouchControls Touch;
 	FFigure Figures[12];
 	FVC26Sounds Sounds;

@@ -20,6 +20,11 @@ enum class ContactQuality : std::uint8_t { Perfect, Good, Shank };  // GDD 1.3 t
 enum class ContactKind : std::uint8_t { Serve, Pass, Set, Attack, FreeBall, Block };
 enum class PointReason : std::uint8_t { Ace, Kill, BallDown, Out, Antenna, Block, NetTouch };
 
+// The human side's ratings, 40-99. 70 plays exactly like the untouched sim.
+enum class Skill : std::uint8_t { Serve, Pass, Set, Attack, Block };
+constexpr int kSkills = 5;
+using SkillRatings = std::array<int, kSkills>;
+
 // `error` is seconds before (+) or after (-) the ideal contact.
 // Empty when the press is too far off to touch the ball.
 VC26CORE_API std::optional<ContactQuality> gradeTiming(float error);
@@ -44,6 +49,7 @@ struct SimEvent {
     ContactKind kind = ContactKind::Serve;
     ContactQuality quality = ContactQuality::Good;
     PointReason reason = PointReason::Kill;
+    bool clutch = false;  // the point was played with a set on the line
 };
 
 // The next touch the sim expects.
@@ -78,6 +84,7 @@ public:
         std::uint32_t seed = 1;
         bool humanHome = true;  // false: the CPU plays both teams
         float cpuSkill = 0.7f;  // 0..1
+        SkillRatings humanSkills = {70, 70, 70, 70, 70};
     };
 
     explicit RallySim(const Config& config);
@@ -132,6 +139,7 @@ private:
     int chooseReceiver(Team team, int touch, Vec3 point, bool spikeable) const;
     Vec3 basePosition(int player) const;
     bool isHumanTeam(Team team) const { return config_.humanHome && team == Team::Home; }
+    float skillBoost(Team team, Skill skill) const;  // about -1..1; 0 for CPU teams
     ContactQuality cpuQuality();
     float rand01();
     Vec3 scatter(float radius);

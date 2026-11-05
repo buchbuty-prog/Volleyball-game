@@ -81,6 +81,7 @@ This is the system that lets a player select **any court position** (not just th
 | Ball flight, shadow reticle, in/out calls | `stepBall()`, `timeToHeight()`, `isInCourt()` in `Ball.h` |
 | Perfect / Good / Shank timing, full 6v6 rally with CPU players | `gradeTiming()`, `RallySim` |
 | Solo block: roof / touch / net-touch risk (double and triple not yet) | `BlockAttempt`, `RallySim::resolveBlock()` |
+| Be a Pro career: archetypes, seasons, promotion, scouts, match rating, skill points (GDD 2.A) | `Career`, `matchRating()`, `recordEvent()` |
 
 ---
 
