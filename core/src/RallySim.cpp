@@ -61,6 +61,11 @@ constexpr float kNettedPower = 0.2f;        // below this the serve doesn't clea
 constexpr float kServeHop = 0.35f;
 constexpr float kPointPause = 2.6f;
 
+constexpr float kZoneEnter = 0.75f;
+constexpr float kZoneExit = 0.45f;
+constexpr float kZoneTiming = 1.35f;      // timing windows widen by this in the Zone
+constexpr float kPressureGauge = 0.8f;    // the serve gauge runs faster when a set is on the line
+
 float sideSign(Team t) { return t == Team::Home ? -1.f : 1.f; }
 float leftSign(Team t) { return t == Team::Home ? 1.f : -1.f; }
 Team sideOf(float x) { return x < 0.f ? Team::Home : Team::Away; }
@@ -151,9 +156,32 @@ float RallySim::skillBoost(Team team, Skill skill) const {
     return static_cast<float>(config_.humanSkills[static_cast<int>(skill)] - kNeutralSkill) / static_cast<float>(kMaxSkill - kNeutralSkill);
 }
 
+std::optional<ContactQuality> RallySim::gradePress(Team team, float error) const {
+    return gradeTiming(inZone(team) ? error / kZoneTiming : error);
+}
+
+void RallySim::updateMomentum(Team winner, bool setWon) {
+    const float direction = winner == Team::Home ? 1.f : -1.f;
+    streak_ = streak_ * direction > 0.f ? streak_ + static_cast<int>(direction) : static_cast<int>(direction);
+    const int run = std::min(std::abs(streak_), 5);
+    momentum_ = std::clamp(momentum_ * 0.92f + direction * (0.1f + 0.04f * static_cast<float>(run)), -1.f, 1.f);
+    if (setWon) momentum_ *= 0.35f;  // a new set is a fresh start
+
+    const int side = momentum_ > 0.f ? 1 : -1;
+    if (zone_ != 0 && momentum_ * static_cast<float>(zone_) < kZoneExit) zone_ = 0;
+    if (zone_ == 0 && std::fabs(momentum_) >= kZoneEnter) {
+        zone_ = side;
+        SimEvent e;
+        e.type = SimEvent::Type::ZoneStart;
+        e.team = side > 0 ? Team::Home : Team::Away;
+        events_.push_back(e);
+    }
+}
+
 float RallySim::serveGauge() const {
     if (!charging_) return 0.f;  // chargeTime_ stops during the toss, which holds the value
-    const float t = std::fmod(chargeTime_ / kGaugeHalfPeriod, 2.f);
+    const float halfPeriod = kGaugeHalfPeriod * (pressure_ ? kPressureGauge : 1.f);
+    const float t = std::fmod(chargeTime_ / halfPeriod, 2.f);
     return t <= 1.f ? t : 2.f - t;
 }
 
@@ -202,6 +230,7 @@ void RallySim::startRally() {
     touches_ = 0;
     lastToucher_ = -1;
 
+    pressure_ = score_.setPointFor().has_value();
     serving_ = rotation_[0]->serving() ? Team::Home : Team::Away;
     lastTeam_ = serving_;
     lastKind_ = ContactKind::Serve;
@@ -428,7 +457,7 @@ bool RallySim::updateBlock(float dt, bool pressed) {
         const float error = block_.timeToContact - kBlockLead;
         if (isHumanTeam(block_.team)) {
             if (pressed) {
-                if (const auto quality = gradeTiming(error)) {
+                if (const auto quality = gradePress(block_.team, error)) {
                     block_.committed = true;
                     block_.quality = *quality;
                     usedPress = true;
@@ -482,9 +511,10 @@ void RallySim::resolveBlock(Vec3 crossing) {
 ContactQuality RallySim::cpuQuality() {
     const float speed = std::sqrt(ball_.vel.x * ball_.vel.x + ball_.vel.y * ball_.vel.y + ball_.vel.z * ball_.vel.z);
     const float hard = pending_.touch == 1 ? std::clamp((speed - 10.f) / 8.f, 0.f, 1.f) : 0.f;
-    const float perfect = (0.25f + 0.45f * config_.cpuSkill) * (1.f - 0.7f * hard);
-    const float serveBonus = lastKind_ == ContactKind::Serve ? 0.3f : 0.f;
-    const float shank = 0.25f - 0.2f * config_.cpuSkill + 0.35f * hard + serveBonus;
+    const float zone = inZone(pending_.team) ? 1.25f : 1.f;
+    const float perfect = (0.25f + 0.45f * config_.cpuSkill) * (1.f - 0.7f * hard) * zone;
+    const float serveBonus = lastKind_ == ContactKind::Serve ? 0.38f : 0.f;
+    const float shank = (0.25f - 0.2f * config_.cpuSkill + 0.35f * hard + serveBonus) / zone;
     const float r = rand01();
     if (r < perfect) return ContactQuality::Perfect;
     return r < 1.f - shank ? ContactQuality::Good : ContactQuality::Shank;
@@ -567,7 +597,7 @@ void RallySim::updateInPlay(float dt, const SimInput& input, bool pressed) {
             if (!pending_.jumped) {
                 if (human) {
                     if (pressed) {
-                        if (const auto graded = gradeTiming(error)) {
+                        if (const auto graded = gradePress(pending_.team, error)) {
                             pending_.jumped = true;
                             pending_.jumpQuality = *graded;
                         }
@@ -586,7 +616,7 @@ void RallySim::updateInPlay(float dt, const SimInput& input, bool pressed) {
             }
         } else if (human) {
             if (pressed && pending_.timeToContact <= kShankWindow) {
-                quality = gradeTiming(pending_.timeToContact);
+                quality = gradePress(pending_.team, pending_.timeToContact);
             } else if (pending_.timeToContact < -kShankWindow) {
                 pending_.active = false;
             }
@@ -662,7 +692,7 @@ void RallySim::endRally(Team winner, PointReason reason) {
 
     pointWinner_ = winner;
     const bool clutch = score_.setPointFor().has_value();
-    score_.awardPoint(winner);
+    const PointResult result = score_.awardPoint(winner);
     rotation_[0]->onRallyEnd(winner == Team::Home);
     rotation_[1]->onRallyEnd(winner == Team::Away);
 
@@ -672,6 +702,7 @@ void RallySim::endRally(Team winner, PointReason reason) {
     e.reason = reason;
     e.clutch = clutch;
     events_.push_back(e);
+    updateMomentum(winner, result.setWon);
 }
 
 void RallySim::movePlayers(float dt, const SimInput& input) {

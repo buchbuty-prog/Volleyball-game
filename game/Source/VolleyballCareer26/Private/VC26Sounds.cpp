@@ -83,6 +83,11 @@ void FVC26Sounds::Init()
 		return (FMath::Sin(2.f * PI * 2900.f * T) + FMath::Sin(2.f * PI * 3050.f * T)) * 0.3f * Trill * Envelope;
 	});
 	{
+		auto First = Thump(70.f, 45.f, 14.f);
+		auto Second = Thump(62.f, 40.f, 16.f);
+		Clip(EVC26Sound::Heartbeat) = Render(0.5f, [&](float T) { return First(T) + (T > 0.2f ? Second(T - 0.2f) * 0.7f : 0.f); });
+	}
+	{
 		auto Crowd = Noise(5, 0.12f);
 		Clip(EVC26Sound::Cheer) = Render(1.8f, [&](float T)
 		{

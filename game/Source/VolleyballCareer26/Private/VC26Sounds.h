@@ -16,6 +16,7 @@ enum class EVC26Sound : uint8
 	Net,
 	Whistle,
 	Cheer,
+	Heartbeat,
 	Count
 };
 

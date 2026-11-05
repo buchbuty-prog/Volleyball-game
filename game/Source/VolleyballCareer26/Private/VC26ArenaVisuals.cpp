@@ -632,7 +632,7 @@ void AVC26Arena::SyncShapes(float DeltaSeconds)
 	}
 	UpdateBall(DeltaSeconds);
 
-	const bool bMatch = GetScreen() == EVC26Screen::Match;
+	const bool bMatch = GetScreen() == EVC26Screen::Match && !IsReplaying();
 	const FVector Controlled = SimToWorld(Sim->players()[Sim->controlled()].pos);
 	ControlledMarker->SetVisibility(bMatch && Sim->humanHome());
 	ControlledMarker->SetWorldLocation(FVector(Controlled.X, Controlled.Y, 3.f));
@@ -647,7 +647,7 @@ void AVC26Arena::UpdateRings()
 
 	const vc26::PendingContact& Pending = Sim->pending();
 	const vc26::BlockAttempt& Block = Sim->block();
-	const bool bHuman = GetScreen() == EVC26Screen::Match && Sim->humanHome();
+	const bool bHuman = GetScreen() == EVC26Screen::Match && Sim->humanHome() && !IsReplaying();
 
 	bool bShow = false;
 	bool bReady = false;
@@ -712,7 +712,15 @@ void AVC26Arena::UpdateCamera(float DeltaSeconds)
 	FVector LookAt;
 	float Speed = 3.f;
 
-	if (GetScreen() != EVC26Screen::Match)
+	if (IsReplaying())
+	{
+		// Low from the sideline, tracking the ball.
+		const FVector Ball = SimToWorld(Sim->ball().pos);
+		Desired = FVector(Ball.X * 0.75f, -780.f, 330.f);
+		LookAt = FVector(Ball.X, Ball.Y * 0.6f, FMath::Clamp(Ball.Z * 0.6f, 60.f, 200.f));
+		Speed = 4.f;
+	}
+	else if (GetScreen() != EVC26Screen::Match)
 	{
 		// A slow circle around the court behind the menus.
 		OrbitAngle += DeltaSeconds * 0.08f;

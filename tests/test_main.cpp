@@ -779,6 +779,61 @@ TEST(dead_ball_bounces_and_comes_to_rest_on_the_floor) {
     CHECK(sawPointOver && peak > 0.2f);
 }
 
+// --- Moments ----------------------------------------------------------------
+
+TEST(a_run_of_points_builds_momentum_into_the_zone) {
+    RallySim::Config c;
+    c.seed = 4;
+    c.humanHome = false;
+    RallySim sim(c);
+    int zones = 0;
+    float strongest = 0.f;
+    for (long i = 0; i < 40000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+        sim.step(kDt, {});
+        strongest = std::max(strongest, std::fabs(sim.momentum()));
+        CHECK(std::fabs(sim.momentum()) <= 1.f);
+        for (const SimEvent& e : sim.takeEvents()) zones += e.type == SimEvent::Type::ZoneStart;
+    }
+    CHECK(zones > 0 && strongest >= 0.75f);
+    std::printf("  %d zones in a match\n", zones);
+}
+
+TEST(a_copied_match_replays_exactly_with_the_same_input) {
+    RallySim::Config c;
+    c.seed = 21;
+    RallySim live(c);
+    ScriptedHuman player;
+    for (int i = 0; i < 4000; ++i) live.step(kDt, player(live));
+    live.takeEvents();
+
+    RallySim replay(live);
+    std::vector<SimInput> log;
+    for (int i = 0; i < 2000; ++i) {
+        log.push_back(player(live));
+        live.step(kDt, log.back());
+    }
+    for (const SimInput& in : log) replay.step(kDt, in);
+    CHECK(replay.ball().pos.x == live.ball().pos.x && replay.ball().pos.z == live.ball().pos.z);
+    CHECK(replay.players()[3].pos.x == live.players()[3].pos.x);
+    CHECK(replay.score().points(Team::Home) == live.score().points(Team::Home));
+    CHECK(replay.score().points(Team::Away) == live.score().points(Team::Away));
+}
+
+TEST(set_point_is_flagged_and_speeds_the_gauge) {
+    RallySim::Config c;
+    c.rules.setPoints = 2;
+    c.rules.winBy = 1;
+    c.seed = 8;
+    c.humanHome = false;
+    RallySim sim(c);
+    bool saw = false;
+    for (long i = 0; i < 400000L && !saw; ++i) {
+        sim.step(kDt, {});
+        saw = sim.pressurePoint();
+    }
+    CHECK(saw);
+}
+
 // --- Career -----------------------------------------------------------------
 
 namespace {

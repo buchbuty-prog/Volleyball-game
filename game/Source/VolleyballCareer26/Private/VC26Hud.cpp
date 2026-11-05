@@ -287,7 +287,7 @@ void AVC26Hud::DrawReport(const AVC26Arena& Arena, const vc26::Career& Career)
 		Label(Lines[i].Key, 900.f, Y, Muted, 1.3f);
 		Label(FString::FromInt(Lines[i].Value), 1380.f, Y, FLinearColor::White, 1.4f);
 	}
-	DrawCentred(TEXT("Press Enter to continue"), 870.f, Muted, 1.2f);
+	DrawCentred(Arena.HasHighlights() ? TEXT("Press H for highlights, Enter to continue") : TEXT("Press Enter to continue"), 870.f, Muted, 1.2f);
 }
 
 void AVC26Hud::DrawSeasonEnd(const vc26::Career& Career)
@@ -336,11 +336,28 @@ void AVC26Hud::DrawScoreBug(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 	};
 	Row(Top, Arena.GetHomeName(), HomeBlue, Team::Home);
 	Row(Top + 54.f, Arena.GetAwayName(), AwayRed, Team::Away);
+
+	// Momentum grows out from the centre towards the team that has it.
+	const float Centre = Left + 260.f;
+	const float Momentum = Sim.momentum();
+	const bool bZone = Sim.inZone(Team::Home) || Sim.inZone(Team::Away);
+	Panel(Left, Top + 108.f, 520.f, 12.f, Ink);
+	Panel(Momentum < 0.f ? Centre + Momentum * 260.f : Centre, Top + 108.f, FMath::Abs(Momentum) * 260.f, 12.f, bZone ? Gold : Momentum < 0.f ? AwayRed : HomeBlue);
+	Panel(Centre - 1.f, Top + 104.f, 2.f, 20.f, FLinearColor::White);
 }
 
 void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 {
 	using vc26::Team;
+	if (Arena.IsReplaying())
+	{
+		// Letterboxed, so a replay can never be mistaken for live play.
+		Panel(0.f, 0.f, 1920.f, 96.f, FLinearColor::Black);
+		Panel(0.f, 984.f, 1920.f, 96.f, FLinearColor::Black);
+		Label(TEXT("REPLAY"), 60.f, 24.f, Gold, 2.f);
+		DrawCentred(TEXT("Press SPACE to skip"), 1010.f, Muted, 1.1f);
+		return;
+	}
 	DrawScoreBug(Arena, Sim);
 
 	const vc26::TouchControls* Touch = Arena.GetTouch();
@@ -348,6 +365,10 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 	if (!Arena.IsCareerMatch() && Sim.humanHome())
 	{
 		Label(FString::Printf(TEXT("%s  %s"), Arena.GetDifficultyName(), bTouch ? TEXT("(tap to change)") : TEXT("(1 Easy, 2 Normal, 3 Hard)")), 40.f, 150.f, Muted, bTouch ? 1.6f : 1.f);
+	}
+	if (Sim.inZone(Team::Home))
+	{
+		Label(TEXT("IN THE ZONE: timing windows wider"), 40.f, 190.f, Gold, 1.f);
 	}
 	if (bTouch)
 	{
@@ -378,7 +399,9 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 		if (Sim.serveCharging())
 		{
 			// Red below 0.2 nets the serve; above 0.85 it goes long.
-			DrawBar(980.f, Sim.serveGauge(), {FVector4f(0.f, 0.2f, 0.f, 0.8f), FVector4f(0.6f, 0.85f, 0.8f, 0.1f), FVector4f(0.85f, 1.f, 0.f, 0.8f)});
+			// Nerves: at set point the marker trembles as well as running faster.
+			const float Shake = Sim.pressurePoint() ? FMath::Sin(GetWorld()->GetTimeSeconds() * 47.f) * 0.012f : 0.f;
+			DrawBar(980.f, Sim.serveGauge() + Shake, {FVector4f(0.f, 0.2f, 0.f, 0.8f), FVector4f(0.6f, 0.85f, 0.8f, 0.1f), FVector4f(0.85f, 1.f, 0.f, 0.8f)});
 		}
 		return;
 	}

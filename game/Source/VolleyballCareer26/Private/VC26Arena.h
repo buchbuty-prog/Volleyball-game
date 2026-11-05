@@ -75,6 +75,9 @@ public:
 	const TCHAR* GetDifficultyName() const;
 	const vc26::TouchControls* GetTouch() const { return bUseTouch ? &Touch : nullptr; }
 
+	bool IsReplaying() const { return ParkedSim.IsValid(); }
+	bool HasHighlights() const { return !Highlights.IsEmpty(); }
+
 	EVC26Screen GetScreen() const { return Screen; }
 	int32 GetMenuIndex() const { return MenuIndex; }
 	TArray<FVC26MenuItem> GetMenuItems() const;
@@ -117,6 +120,19 @@ private:
 	void SetBanner(const FString& Text);
 	void SetDifficulty(int32 Level);
 	void RunScreenshotTour(float DeltaSeconds);
+
+	// Replays (the sim is deterministic, so a copy plus the input log rebuilds a rally).
+	struct FClip
+	{
+		TSharedPtr<vc26::RallySim> Start;
+		TArray<vc26::SimInput> Inputs;
+		int32 Excitement = 0;
+	};
+	void BeginClip(const FClip& Clip);
+	void PlayNextClip();
+	void EndReplay();
+	void UpdateReplay(float DeltaSeconds);
+	void UpdateMoments(float DeltaSeconds);
 
 	// Drawing (VC26ArenaVisuals.cpp).
 	UMaterialInstanceDynamic* ColorMaterial(const FLinearColor& Color);
@@ -192,6 +208,18 @@ private:
 	TObjectPtr<UStaticMeshComponent> ControlledMarker;
 
 	TUniquePtr<vc26::RallySim> Sim;
+	TUniquePtr<vc26::RallySim> ParkedSim;  // the live match, while a replay plays in Sim
+	TSharedPtr<vc26::RallySim> Snapshot;   // the rally at its last set or serve
+	TArray<vc26::SimInput> InputLog;       // everything since Snapshot
+	TArray<FClip> ReplayQueue;
+	TArray<FClip> Highlights;
+	TArray<vc26::SimInput> ReplayInputs;
+	int32 ReplayCursor = 0;
+	EVC26Screen ReplayReturn = EVC26Screen::Match;
+	int32 RallyExcitement = 0;
+	float ReplayCountdown = -1.f;
+	float HeartbeatTimer = 0.f;
+	bool bPressureAnnounced = false;
 	TOptional<vc26::Career> Career;
 	vc26::MatchStats Stats;
 	vc26::MatchReport Report;

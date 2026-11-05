@@ -75,6 +75,7 @@ void recordEvent(MatchStats& stats, const SimEvent& e) {
             if (e.team == Team::Home) ++stats.whiffs;
             break;
         case SimEvent::Type::NetHit:
+        case SimEvent::Type::ZoneStart:
             break;
         case SimEvent::Type::Point:
             if (e.team == Team::Home) {

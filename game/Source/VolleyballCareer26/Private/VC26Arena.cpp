@@ -20,6 +20,7 @@ namespace
 	constexpr float CpuSkillLevels[] = {0.35f, 0.7f, 1.f};
 	constexpr float SlowMoScale = 0.4f;  // GDD 1.1: 0.4x for 300 ms on a power spike
 	constexpr float SlowMoSeconds = 0.3f;
+	constexpr float ReplaySpeed = 0.45f;
 
 	FString SavePath()
 	{
@@ -109,6 +110,7 @@ void AVC26Arena::StartBackgroundMatch()
 	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
 	Config.humanHome = false;
 	Sim = MakeUnique<vc26::RallySim>(Config);
+	ReplayCountdown = -1.f;
 	bCareerMatch = false;
 	HomeName = TEXT("HOME");
 	AwayName = TEXT("AWAY");
@@ -135,6 +137,10 @@ void AVC26Arena::StartMatch(bool bCareer)
 
 	Sim = MakeUnique<vc26::RallySim>(Config);
 	Stats = {};
+	Highlights.Reset();
+	Snapshot.Reset();
+	InputLog.Reset();
+	ReplayCountdown = -1.f;
 	bCareerMatch = bCareer;
 	Accumulator = 0.f;
 	bCameraReady = false;
@@ -298,7 +304,15 @@ void AVC26Arena::UpdateMenus()
 			ChosenArchetype = (ChosenArchetype + 1) % vc26::kArchetypes;
 		}
 	}
-	if (Pressed({EKeys::Enter, EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom}))
+	if (Screen == EVC26Screen::Report && HasHighlights() && Pressed({EKeys::H, EKeys::Gamepad_FaceButton_Top}))
+	{
+		ReplayQueue = Highlights;
+		ReplayReturn = EVC26Screen::Report;
+		ParkedSim = MoveTemp(Sim);
+		Screen = EVC26Screen::Match;
+		PlayNextClip();
+	}
+	else if (Pressed({EKeys::Enter, EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom}))
 	{
 		ConfirmMenu();
 	}
@@ -428,6 +442,20 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	}
 
 	UpdateTouch();
+	if (IsReplaying())
+	{
+		UpdateReplay(DeltaSeconds);
+		HandleEvents();
+		SyncShapes(DeltaSeconds);
+		UpdateCamera(DeltaSeconds);
+		Sounds.Tick(DeltaSeconds);
+		if (!ShotDir.IsEmpty())
+		{
+			RunScreenshotTour(DeltaSeconds);
+		}
+		return;
+	}
+
 	const bool bInMatch = Screen == EVC26Screen::Match;
 	const APlayerController* Player = Cast<APlayerController>(GetController());
 
@@ -487,12 +515,18 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	while (Accumulator >= SimStep)
 	{
 		Sim->step(SimStep, Input);
+		InputLog.Add(Input);
 		Accumulator -= SimStep;
 	}
 
 	SlowMoLeft = FMath::Max(SlowMoLeft - DeltaSeconds, 0.f);
 	Sounds.SetMuted(Screen != EVC26Screen::Match);  // the match behind the menus stays silent
 	HandleEvents();
+	UpdateMoments(DeltaSeconds);
+	if (IsReplaying())
+	{
+		return;  // a replay just took over
+	}
 	SyncShapes(DeltaSeconds);
 	UpdateCamera(DeltaSeconds);
 	Sounds.Tick(DeltaSeconds);
@@ -504,17 +538,132 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	}
 }
 
+void AVC26Arena::BeginClip(const FClip& Clip)
+{
+	Sim = MakeUnique<vc26::RallySim>(*Clip.Start);
+	ReplayInputs = Clip.Inputs;
+	ReplayCursor = 0;
+	Accumulator = 0.f;
+	bCameraReady = false;
+}
+
+void AVC26Arena::PlayNextClip()
+{
+	if (ReplayQueue.IsEmpty())
+	{
+		EndReplay();
+		return;
+	}
+	const FClip Clip = ReplayQueue[0];
+	ReplayQueue.RemoveAt(0);
+	BeginClip(Clip);
+}
+
+void AVC26Arena::EndReplay()
+{
+	Sim = MoveTemp(ParkedSim);
+	ReplayQueue.Reset();
+	Screen = ReplayReturn;
+	Accumulator = 0.f;
+	bCameraReady = false;
+}
+
+void AVC26Arena::UpdateReplay(float DeltaSeconds)
+{
+	const APlayerController* Player = Cast<APlayerController>(GetController());
+	if (Player && (Player->WasInputKeyJustPressed(EKeys::SpaceBar) || Player->WasInputKeyJustPressed(EKeys::Enter) ||
+		Player->WasInputKeyJustPressed(EKeys::Escape) || Player->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom)))
+	{
+		EndReplay();
+		return;
+	}
+
+	Accumulator = FMath::Min(Accumulator + DeltaSeconds * ReplaySpeed, 0.25f);
+	while (Accumulator >= SimStep && ReplayCursor < ReplayInputs.Num())
+	{
+		Sim->step(SimStep, ReplayInputs[ReplayCursor++]);
+		Accumulator -= SimStep;
+	}
+	if (ReplayCursor >= ReplayInputs.Num())
+	{
+		PlayNextClip();
+	}
+}
+
+void AVC26Arena::UpdateMoments(float DeltaSeconds)
+{
+	if (Screen != EVC26Screen::Match || !Sim->humanHome())
+	{
+		return;
+	}
+
+	// The crowd stays up while a team is in the Zone.
+	if (Sim->inZone(vc26::Team::Home) || Sim->inZone(vc26::Team::Away))
+	{
+		CrowdExcitement = FMath::Max(CrowdExcitement, 0.22f);
+	}
+
+	// Set point: a hush, a heartbeat and a tighter shot.
+	const bool bPressure = Sim->pressurePoint() && Sim->phase() == vc26::RallyPhase::PreServe;
+	if (bPressure && !bPressureAnnounced)
+	{
+		SetBanner(TEXT("SET POINT"));
+		HeartbeatTimer = 0.f;
+	}
+	bPressureAnnounced = bPressure;
+	if (bPressure)
+	{
+		HeartbeatTimer -= DeltaSeconds;
+		if (HeartbeatTimer <= 0.f)
+		{
+			Sounds.Play(this, EVC26Sound::Heartbeat, 0.8f);
+			HeartbeatTimer = 0.8f;
+		}
+	}
+	Camera->SetFieldOfView(FMath::FInterpTo(Camera->FieldOfView, bPressure ? 50.f : 62.f, DeltaSeconds, 2.5f));
+
+	if (ReplayCountdown >= 0.f)
+	{
+		ReplayCountdown -= DeltaSeconds;
+		if (ReplayCountdown < 0.f && Snapshot.IsValid())
+		{
+			const FClip Clip{Snapshot, InputLog, RallyExcitement};
+			Highlights.Add(Clip);
+			Highlights.Sort([](const FClip& A, const FClip& B) { return A.Excitement > B.Excitement; });
+			Highlights.SetNum(FMath::Min(Highlights.Num(), 3));
+
+			// Only the best rallies stop the match for a replay.
+			if (RallyExcitement >= (ShotDir.IsEmpty() ? 5 : 1))
+			{
+				ReplayQueue = {Clip};
+				ReplayReturn = EVC26Screen::Match;
+				ParkedSim = MoveTemp(Sim);
+				PlayNextClip();
+			}
+		}
+	}
+}
+
 void AVC26Arena::SetBanner(const FString& Text)
 {
+	if (IsReplaying())
+	{
+		return;
+	}
 	Banner = Text;
 	BannerTimeLeft = 1.6f;
 }
 
 void AVC26Arena::HandleEvents()
 {
+	const bool bLive = !IsReplaying();
+	bool bTakeSnapshot = false;
 	for (const vc26::SimEvent& Event : Sim->takeEvents())
 	{
-		vc26::recordEvent(Stats, Event);
+		if (bLive)
+		{
+			vc26::recordEvent(Stats, Event);
+		}
 
 		switch (Event.type)
 		{
@@ -554,6 +703,7 @@ void AVC26Arena::HandleEvents()
 				Swing = EPose::Block;
 				break;
 			}
+			bTakeSnapshot = bTakeSnapshot || Event.kind == vc26::ContactKind::Serve || Event.kind == vc26::ContactKind::Set;
 			FFigure& Figure = Figures[Event.player];
 			Figure.Swing = Swing;
 			Figure.SwingLeft = 0.28f;
@@ -588,6 +738,12 @@ void AVC26Arena::HandleEvents()
 		case vc26::SimEvent::Type::Point:
 		{
 			CrowdExcitement = FMath::Min(0.5f + Sim->contactsThisRally() / 12.f, 1.f);
+			if (bLive && Sim->humanHome())
+			{
+				RallyExcitement = Sim->contactsThisRally() / 3 + (Event.clutch ? 3 : 0);
+				RallyExcitement += Event.reason == vc26::PointReason::Ace ? 3 : Event.reason == vc26::PointReason::Block ? 4 : Event.reason == vc26::PointReason::Kill ? 1 : 0;
+				ReplayCountdown = 1.1f;  // lets the ball land and bounce in the clip
+			}
 			if (Sim->ball().pos.z < 0.5f)
 			{
 				Sounds.Play(this, EVC26Sound::Floor);
@@ -602,7 +758,17 @@ void AVC26Arena::HandleEvents()
 				ReasonText(Event.reason), Sim->contactsThisRally(), Score.setNumber(), Score.points(vc26::Team::Home), Score.points(vc26::Team::Away));
 			break;
 		}
+		case vc26::SimEvent::Type::ZoneStart:
+			Sounds.Play(this, EVC26Sound::Cheer, 0.6f);
+			SetBanner(Event.team == vc26::Team::Home ? TEXT("IN THE ZONE!") : FString::Printf(TEXT("%s IN THE ZONE"), *AwayName.ToUpper()));
+			break;
 		}
+	}
+
+	if (bTakeSnapshot && bLive && Sim->humanHome())
+	{
+		Snapshot = MakeShared<vc26::RallySim>(*Sim);
+		InputLog.Reset();
 	}
 }
 
@@ -616,14 +782,15 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 	};
 
 	// The last steps wait for a moment in a live match, with a time limit.
-	if (TourStep == 16 || TourStep == 17)
+	if (TourStep >= 16 && TourStep <= 18)
 	{
 		const vc26::PendingContact& Pending = Sim->pending();
 		const bool bRing = TourStep == 16 && Pending.active && Pending.team == vc26::Team::Home && Pending.timeToContact < 0.5f;
 		const bool bBlock = TourStep == 17 && Sim->humanBlocking() && Sim->block().timeToContact < 0.6f;
-		if (bRing || bBlock || TourTime > 40.f)
+		const bool bReplay = TourStep == 18 && IsReplaying() && ReplayCursor > 120;
+		if (bRing || bBlock || bReplay || TourTime > 40.f)
 		{
-			Shot(TourStep == 16 ? TEXT("10_rings") : TEXT("11_block"));
+			Shot(TourStep == 16 ? TEXT("10_rings") : TourStep == 17 ? TEXT("11_block") : TEXT("12_replay"));
 			++TourStep;
 			TourTime = 0.f;
 		}

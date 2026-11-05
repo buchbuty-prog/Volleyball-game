@@ -53,7 +53,7 @@ struct SimPlayer {
 };
 
 struct SimEvent {
-    enum class Type : std::uint8_t { Contact, Whiff, NetHit, Point };
+    enum class Type : std::uint8_t { Contact, Whiff, NetHit, Point, ZoneStart };
     Type type = Type::Contact;
     Team team = Team::Home;  // who touched the ball, or who won the point
     int player = -1;         // index into players(), for contacts
@@ -133,6 +133,12 @@ public:
     float serveAim() const { return serveAim_; }
     Team pointWinner() const { return pointWinner_; }
 
+    // -1 (Away) to 1 (Home). Runs of points build it; a team that gets far
+    // enough is in the Zone until it slips back.
+    float momentum() const { return momentum_; }
+    bool inZone(Team team) const { return zone_ == (team == Team::Home ? 1 : -1); }
+    bool pressurePoint() const { return pressure_; }  // this rally can end a set
+
     int contactsThisRally() const { return rallyContacts_; }
 
     // Returns the events since the last call.
@@ -160,6 +166,8 @@ private:
     Vec3 formationPosition(int player) const;
     bool isHumanTeam(Team team) const { return config_.humanHome && team == Team::Home; }
     float skillBoost(Team team, Skill skill) const;  // about -1..1; 0 for CPU teams
+    std::optional<ContactQuality> gradePress(Team team, float error) const;
+    void updateMomentum(Team winner, bool setWon);
     ContactQuality cpuQuality();
     float rand01() { return nextRand01(rng_); }
     Vec3 scatter(float radius);
@@ -180,6 +188,10 @@ private:
     bool tossing_ = false;
     float tossTime_ = 0.f;
     Team pointWinner_ = Team::Home;
+    float momentum_ = 0.f;
+    int zone_ = 0;  // 1 Home, -1 Away, 0 neither
+    int streak_ = 0;
+    bool pressure_ = false;
     float chargeTime_ = 0.f;
     float serveAim_ = 0.f;
 
