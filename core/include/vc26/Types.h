@@ -44,6 +44,15 @@ struct Player {
 
 using Court = std::array<Player, kSlots>;
 
+// The one random generator (xorshift32). Saves store its state, so changing it
+// changes every career already in progress.
+inline float nextRand01(std::uint32_t& state) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return static_cast<float>(state >> 8) / 16777216.f;
+}
+
 const char* toString(Slot s);
 const char* toString(Role r);
 const char* toString(Legality l);

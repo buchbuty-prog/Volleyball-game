@@ -20,8 +20,8 @@ Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run 
 
 | Input | Action |
 |---|---|
-| W A S D / arrows / left stick | Move to the ring when passing. Aim the serve, set and attack. Slide along the net when blocking |
-| Space / gamepad A | Hold and release to serve. Press on the timing mark to play the ball or jump to block |
+| W A S D / arrows / left stick | Steer to the ball (your player runs there by itself if you don't). Aim the serve, set and attack. Slide along the net when blocking |
+| Space / gamepad A | Hold and release to serve. Otherwise press as the closing gold ring meets the ring on the floor: to pass, to set, and to jump for an attack or block |
 | 1 / 2 / 3 | Easy, Normal or Hard CPU |
 
 You control whichever Home player the ball is going to, or your nearest front-row blocker when the opponent attacks. Sets and attacks position the player for you.

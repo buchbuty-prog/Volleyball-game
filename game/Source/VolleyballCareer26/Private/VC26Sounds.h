@@ -23,6 +23,7 @@ class FVC26Sounds
 {
 public:
 	void Init();
+	void SetMuted(bool bInMuted) { bMuted = bInMuted; }
 	void Play(UObject* WorldContext, EVC26Sound Sound, float Volume = 1.f, float Pitch = 1.f);
 
 	// Procedural waves never finish by themselves, so each one is stopped here.
@@ -37,4 +38,5 @@ private:
 
 	TArray<uint8> Clips[static_cast<int32>(EVC26Sound::Count)];
 	TArray<FActive> Active;
+	bool bMuted = false;
 };

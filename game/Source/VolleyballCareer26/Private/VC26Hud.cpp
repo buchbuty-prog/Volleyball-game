@@ -10,10 +10,6 @@ namespace
 	constexpr float BarWidth = 560.f;
 	constexpr float BarHeight = 26.f;
 
-	// The timing bar shows this many seconds before and after the ideal contact.
-	constexpr float BarLead = 0.9f;
-	constexpr float BarTail = 0.3f;
-
 	constexpr float TextScale = 1.3f;  // the engine's large font is small at 1080p
 
 	const FLinearColor Ink(0.02f, 0.03f, 0.07f, 0.93f);
@@ -22,11 +18,6 @@ namespace
 	const FLinearColor Muted(0.72f, 0.75f, 0.82f);
 	const FLinearColor HomeBlue(0.05f, 0.25f, 0.8f, 0.95f);
 	const FLinearColor AwayRed(0.72f, 0.08f, 0.08f, 0.95f);
-
-	float TimeToBar(float Seconds)
-	{
-		return (BarLead - Seconds) / (BarLead + BarTail);
-	}
 
 	FString Str(const char* Text)
 	{
@@ -53,7 +44,7 @@ namespace
 
 float AVC26Hud::Ui() const
 {
-	return Canvas->ClipY / 1080.f;
+	return FMath::Min(Canvas->ClipX / 1920.f, Canvas->ClipY / 1080.f);
 }
 
 // Keeps the 1920-wide layout centred on windows of other shapes.
@@ -111,7 +102,7 @@ void AVC26Hud::DrawCircle(float X, float Y, float Radius, const FLinearColor& Co
 
 void AVC26Hud::DrawTouchControls(const vc26::TouchControls& Touch)
 {
-	const float Radius = 0.11f * Canvas->ClipY;
+	const float Radius = Touch.stickRadius();
 	const FLinearColor Rim(1.f, 1.f, 1.f, 0.55f);
 	const FLinearColor Lit(1.f, 0.9f, 0.2f, 0.95f);
 
@@ -136,13 +127,13 @@ void AVC26Hud::DrawMeter(float X, float Y, float Width, float Fill, const FLinea
 
 void AVC26Hud::DrawItems(const AVC26Arena& Arena, float X, float Y, float Width)
 {
-	const TArray<FString> Items = Arena.GetMenuItems();
+	const TArray<FVC26MenuItem> Items = Arena.GetMenuItems();
 	for (int32 i = 0; i < Items.Num(); ++i)
 	{
 		const bool bSelected = i == Arena.GetMenuIndex();
 		const float Top = Y + i * 66.f;
 		Panel(X, Top, Width, 56.f, bSelected ? Gold : Ink);
-		Label(Items[i], X + 22.f, Top + 12.f, bSelected ? FLinearColor(0.02f, 0.03f, 0.07f) : FLinearColor::White, 1.5f);
+		Label(Items[i].Label, X + 22.f, Top + 12.f, bSelected ? FLinearColor(0.02f, 0.03f, 0.07f) : FLinearColor::White, 1.5f);
 	}
 }
 
@@ -159,7 +150,7 @@ void AVC26Hud::DrawMainMenu(const AVC26Arena& Arena)
 void AVC26Hud::DrawCreatePlayer(const AVC26Arena& Arena)
 {
 	const vc26::Archetype Chosen = Arena.GetChosenArchetype();
-	const vc26::Career Preview("", Chosen, 1);
+	const vc26::SkillRatings Skills = vc26::Career::startingSkills(Chosen);
 
 	Panel(460.f, 170.f, 1000.f, 740.f, Ink);
 	Panel(460.f, 170.f, 1000.f, 8.f, Gold);
@@ -170,9 +161,9 @@ void AVC26Hud::DrawCreatePlayer(const AVC26Arena& Arena)
 	for (int32 i = 0; i < vc26::kSkills; ++i)
 	{
 		const float Y = 460.f + i * 62.f;
-		const int32 Value = Preview.skills()[i];
+		const int32 Value = Skills[i];
 		Label(Str(vc26::toString(static_cast<vc26::Skill>(i))), 560.f, Y, FLinearColor::White, 1.4f);
-		DrawMeter(760.f, Y + 14.f, 480.f, (Value - 40) / 59.f, Value > 55 ? Gold : FLinearColor(0.35f, 0.5f, 0.8f));
+		DrawMeter(760.f, Y + 14.f, 480.f, vc26::skillFill(Value), Value > 55 ? Gold : FLinearColor(0.35f, 0.5f, 0.8f));
 		Label(FString::FromInt(Value), 1270.f, Y, FLinearColor::White, 1.4f);
 	}
 	DrawCentred(TEXT("Left / Right to choose, Enter to start your career"), 820.f, Muted, 1.2f);
@@ -247,7 +238,7 @@ void AVC26Hud::DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career)
 	DrawCentred(TEXT("UPGRADE SKILLS"), 164.f, FLinearColor::White, 2.2f);
 	DrawCentred(FString::Printf(TEXT("%d skill points to spend"), Career.skillPoints()), 240.f, Gold, 1.5f);
 
-	const TArray<FString> Items = Arena.GetMenuItems();
+	const TArray<FVC26MenuItem> Items = Arena.GetMenuItems();
 	for (int32 i = 0; i < Items.Num(); ++i)
 	{
 		const float Y = 320.f + i * 92.f;
@@ -257,13 +248,13 @@ void AVC26Hud::DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career)
 		{
 			Panel(420.f, Y, 8.f, 78.f, Gold);
 		}
-		Label(Items[i], 450.f, Y + 22.f, FLinearColor::White, 1.5f);
+		Label(Items[i].Label, 450.f, Y + 22.f, FLinearColor::White, 1.5f);
 		if (i < vc26::kSkills)
 		{
 			const vc26::Skill Skill = static_cast<vc26::Skill>(i);
 			const int32 Value = Career.skills()[i];
 			const int32 Cost = Career.upgradeCost(Skill);
-			DrawMeter(660.f, Y + 32.f, 500.f, (Value - 40) / 59.f, Gold);
+			DrawMeter(660.f, Y + 32.f, 500.f, vc26::skillFill(Value), Gold);
 			Label(FString::FromInt(Value), 1190.f, Y + 20.f, FLinearColor::White, 1.6f);
 			Label(FString::Printf(TEXT("Cost %d"), Cost), 1300.f, Y + 24.f, Career.skillPoints() >= Cost ? Gold : Muted, 1.25f);
 		}
@@ -273,7 +264,7 @@ void AVC26Hud::DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career)
 void AVC26Hud::DrawReport(const AVC26Arena& Arena, const vc26::Career& Career)
 {
 	const vc26::MatchReport& Report = Arena.GetReport();
-	const vc26::MatchStats& Stats = Arena.GetMatchStats();
+	const vc26::MatchStats& Stats = Report.stats;
 
 	Panel(360.f, 130.f, 1200.f, 820.f, Ink);
 	Panel(360.f, 130.f, 1200.f, 8.f, Report.won ? Gold : FLinearColor(0.6f, 0.1f, 0.1f));
@@ -383,7 +374,7 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 
 	if (Sim.humanServing())
 	{
-		DrawCentred(bTouch ? TEXT("Left thumb aims. Hold the right side, release in the green") : TEXT("A / D aim.  Hold SPACE, release in the green zone"), 930.f, FLinearColor::White, 1.3f);
+		DrawCentred(bTouch ? TEXT("Left thumb aims. Hold the right side, release in the green") : TEXT("A / D aim.  Hold SPACE, release in the green zone"), 930.f, FLinearColor::White, 1.1f);
 		if (Sim.serveCharging())
 		{
 			// Red below 0.2 nets the serve; above 0.85 it goes long.
@@ -392,26 +383,21 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 		return;
 	}
 
-	const TArray<FVector4f> TimingZones = {
-		FVector4f(TimeToBar(0.30f), TimeToBar(-0.30f), 0.3f, 0.8f),
-		FVector4f(TimeToBar(0.15f), TimeToBar(-0.15f), 0.7f, 0.5f),
-		FVector4f(TimeToBar(0.06f), TimeToBar(-0.06f), 1.f, 0.1f)};
-
+	// Timing lives on the court, in the closing ring, so eyes can stay on the play.
 	if (Sim.humanBlocking())
 	{
-		DrawCentred(bTouch ? TEXT("BLOCK: slide along the net, tap as the hitter strikes") : TEXT("BLOCK: A / D slides along the net, press SPACE as the hitter strikes"), 930.f, FLinearColor::White, 1.3f);
-		DrawBar(980.f, TimeToBar(Sim.block().timeToContact), TimingZones);
+		DrawCentred(bTouch ? TEXT("BLOCK: slide along the net, tap as the rings meet") : TEXT("BLOCK: A / D slides along the net, SPACE to jump as the rings meet"), 985.f, FLinearColor::White, 1.1f);
 		return;
 	}
 
 	const vc26::PendingContact& Pending = Sim.pending();
 	if (Sim.phase() == vc26::RallyPhase::InPlay && Pending.active && Pending.team == Team::Home)
 	{
-		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: get to the ring, tap on the mark") : TEXT("PASS: get to the ring, press SPACE on the mark"))
-			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb picks the hitter, tap on the mark") : TEXT("SET: A / D picks the hitter, press SPACE on the mark"))
-			: (bTouch ? TEXT("ATTACK: left thumb aims, tap on the mark") : TEXT("ATTACK: WASD aims, press SPACE on the mark"));
-		DrawCentred(Prompt, 930.f, FLinearColor::White, 1.3f);
-		DrawBar(980.f, TimeToBar(Pending.timeToContact), TimingZones);
+		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: tap as the rings meet") : TEXT("PASS: steer to the ring, SPACE as the rings meet"))
+			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb picks the side, tap as the rings meet") : TEXT("SET: A / D picks the side, SPACE as the rings meet"))
+			: Pending.spike ? (bTouch ? TEXT("ATTACK: left thumb aims, tap to jump as the rings meet") : TEXT("ATTACK: WASD aims, SPACE to jump as the rings meet"))
+			: (bTouch ? TEXT("Tap as the rings meet to play it over") : TEXT("SPACE as the rings meet to play it over"));
+		DrawCentred(Prompt, 985.f, FLinearColor::White, 1.1f);
 	}
 }
 

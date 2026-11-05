@@ -6,7 +6,6 @@
 #include <array>
 #include <optional>
 #include <string>
-#include <vector>
 
 #include "vc26/RallySim.h"
 
@@ -62,6 +61,7 @@ struct MatchReport {
     float rating = 6.f;
     int skillPoints = 0;
     int scoutGain = 0;
+    MatchStats stats;  // a copy, so the report outlives the match
 };
 
 enum class CareerStage : std::uint8_t { League, Final, SeasonOver };
@@ -72,6 +72,8 @@ public:
     static constexpr int kRounds = kTeams - 1;
 
     Career(std::string name, Archetype archetype, std::uint32_t seed);
+
+    static SkillRatings startingSkills(Archetype archetype);
 
     const std::string& name() const { return name_; }
     Archetype archetype() const { return archetype_; }
@@ -116,7 +118,7 @@ private:
     void simulateMatch(int a, int b);
     void applyResult(int a, int b, int setsA, int setsB);
     void finishSeason();
-    float rand01();
+    float rand01() { return nextRand01(rng_); }
 
     std::string name_;
     Archetype archetype_;

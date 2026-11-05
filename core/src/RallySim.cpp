@@ -14,10 +14,19 @@ constexpr float kGoodWindow = 0.15f;
 constexpr float kShankWindow = 0.30f;
 
 constexpr float kPlayerSpeed = 6.f;
-constexpr float kPassReach = 1.2f;
-constexpr float kCpuPassReach = 0.9f;
-constexpr float kCpuDefenceSpeed = 5.f;
-constexpr float kCpuReaction = 0.25f;  // seconds before a CPU defender starts moving
+constexpr float kHumanAcceleration = 26.f;  // m/s^2: full speed in about a quarter of a second
+constexpr float kCpuAcceleration = 18.f;
+constexpr float kBraking = 16.f;            // how late a player can leave stopping
+constexpr float kFormationSpeed = 5.5f;
+constexpr float kJogSpeed = 4.5f;           // between rallies
+constexpr float kWalkSpeed = 2.5f;
+constexpr float kPassReach = 1.8f;     // the furthest dive
+constexpr float kCpuPassReach = 1.4f;
+constexpr float kCpuDigReach = 1.1f;   // hard-driven balls leave less time to stretch
+constexpr float kCleanReach = 1.0f;    // beyond this a pass is a stretch and loses a grade
+constexpr float kAssistDelay = 0.12f;  // an idle player starts running to the ball after this
+constexpr float kCpuDefenceSpeed = 5.5f;
+constexpr float kCpuReaction = 0.18f;  // seconds before a CPU defender starts moving
 constexpr float kCpuServeReaction = 0.4f;
 constexpr float kPlayReach = 1.5f;
 constexpr float kPassHeight = 0.9f;
@@ -27,13 +36,18 @@ constexpr float kAttackHeight = 3.0f;
 constexpr float kMinSpikeHeight = 2.5f;
 constexpr float kMaxSpikeDistance = 4.5f;  // from the net
 constexpr float kJumpHeight = 0.9f;
-constexpr float kJumpLead = 0.45f;  // seconds before contact the hitter leaves the floor
+constexpr float kJumpLead = 0.45f;       // seconds before contact the hitter leaves the floor
+constexpr float kApproachTime = 1.0f;    // the hitter starts the run-up this long before contact
+constexpr float kApproachBack = 2.6f;    // metres behind the contact point the run-up starts
+constexpr float kTakeoffBack = 0.5f;
+constexpr float kApproachSpeed = 6.8f;
+constexpr float kMissedJumpGrace = 0.2f; // a hitter who never jumped can still bump it over
 
 constexpr float kBlockReach = 0.5f;    // either side of the blocker
 constexpr float kBlockTop = kNetHeight + 0.6f;
 constexpr float kBlockerDepth = 0.35f;  // from the net
 constexpr float kBlockJumpHeight = 0.7f;
-constexpr float kBlockJumpTime = 0.7f;
+constexpr float kBlockLead = 0.3f;      // blockers jump this long before the hitter strikes
 constexpr float kNetTouchChance = 0.06f;  // on a mistimed block
 
 constexpr float kServeHeight = 2.6f;
@@ -44,7 +58,8 @@ constexpr float kTossTime = 0.4f;
 constexpr float kGaugeHalfPeriod = 0.8f;
 constexpr float kDeepestGoodPower = 0.85f;  // at this power the serve lands on the end line
 constexpr float kNettedPower = 0.2f;        // below this the serve doesn't clear the net
-constexpr float kPointPause = 2.f;
+constexpr float kServeHop = 0.35f;
+constexpr float kPointPause = 2.6f;
 
 float sideSign(Team t) { return t == Team::Home ? -1.f : 1.f; }
 float leftSign(Team t) { return t == Team::Home ? 1.f : -1.f; }
@@ -52,19 +67,47 @@ Team sideOf(float x) { return x < 0.f ? Team::Home : Team::Away; }
 
 float flatDistance(Vec3 a, Vec3 b) { return std::hypot(a.x - b.x, a.y - b.y); }
 
+// Metres to the team's left for a rotation slot.
+float slotAcross(Slot s) {
+    if (s == Slot::P1 || s == Slot::P2) return -3.f;
+    if (s == Slot::P4 || s == Slot::P5) return 3.f;
+    return 0.f;
+}
+
 float errorRadius(ContactQuality q, float perfect, float good, float shank) {
     return q == ContactQuality::Perfect ? perfect : q == ContactQuality::Good ? good : shank;
 }
 
-void moveToward(Vec3& pos, Vec3 goal, float maxStep) {
-    const float d = flatDistance(pos, goal);
-    if (d <= maxStep) {
-        pos.x = goal.x;
-        pos.y = goal.y;
+// Changes velocity towards the wanted one, no faster than rate allows.
+void accelerate(SimPlayer& p, float wantX, float wantY, float rate, float dt) {
+    const float dx = wantX - p.vel.x;
+    const float dy = wantY - p.vel.y;
+    const float gap = std::hypot(dx, dy);
+    const float step = rate * dt;
+    if (gap <= step) {
+        p.vel.x = wantX;
+        p.vel.y = wantY;
     } else {
-        pos.x += (goal.x - pos.x) / d * maxStep;
-        pos.y += (goal.y - pos.y) / d * maxStep;
+        p.vel.x += dx / gap * step;
+        p.vel.y += dy / gap * step;
     }
+}
+
+// Runs to a spot and slows down in time to stop on it.
+void steer(SimPlayer& p, Vec3 goal, float topSpeed, float rate, float dt) {
+    const float d = flatDistance(p.pos, goal);
+    if (d < 0.02f) {
+        accelerate(p, 0.f, 0.f, rate, dt);
+        return;
+    }
+    const float speed = std::min(topSpeed, std::sqrt(2.f * kBraking * d));
+    accelerate(p, (goal.x - p.pos.x) / d * speed, (goal.y - p.pos.y) / d * speed, rate, dt);
+}
+
+void jump(SimPlayer& p, float height) {
+    if (p.pos.z > 0.f) return;
+    p.vz = std::sqrt(2.f * kGravity * height);
+    p.vel = p.vel * 0.25f;  // the run-up goes into height, not distance
 }
 
 }  // namespace
@@ -76,6 +119,8 @@ std::optional<ContactQuality> gradeTiming(float error) {
     if (e <= kShankWindow) return ContactQuality::Shank;
     return std::nullopt;
 }
+
+bool inCleanReach(Vec3 feet, Vec3 point) { return flatDistance(feet, point) <= kCleanReach; }
 
 RallySim::RallySim(const Config& config)
     : config_(config), rng_(config.seed ? config.seed : 1u), score_(config.rules) {
@@ -95,13 +140,6 @@ RallySim::RallySim(const Config& config)
 
 std::vector<SimEvent> RallySim::takeEvents() { return std::exchange(events_, {}); }
 
-float RallySim::rand01() {
-    rng_ ^= rng_ << 13;
-    rng_ ^= rng_ >> 17;
-    rng_ ^= rng_ << 5;
-    return static_cast<float>(rng_ >> 8) / 16777216.f;
-}
-
 Vec3 RallySim::scatter(float radius) {
     const float angle = rand01() * 6.2831853f;
     const float r = radius * std::sqrt(rand01());
@@ -110,11 +148,11 @@ Vec3 RallySim::scatter(float radius) {
 
 float RallySim::skillBoost(Team team, Skill skill) const {
     if (!isHumanTeam(team)) return 0.f;
-    return static_cast<float>(config_.humanSkills[static_cast<int>(skill)] - 70) / 29.f;
+    return static_cast<float>(config_.humanSkills[static_cast<int>(skill)] - kNeutralSkill) / static_cast<float>(kMaxSkill - kNeutralSkill);
 }
 
 float RallySim::serveGauge() const {
-    if (!charging_) return 0.f;
+    if (!charging_) return 0.f;  // chargeTime_ stops during the toss, which holds the value
     const float t = std::fmod(chargeTime_ / kGaugeHalfPeriod, 2.f);
     return t <= 1.f ? t : 2.f - t;
 }
@@ -128,16 +166,33 @@ Vec3 RallySim::basePosition(int player) const {
     const SimPlayer& p = players_[player];
     const Slot slot = *rotation_[static_cast<int>(p.team)]->slotOf(p.id);
     const float depth = isFrontRow(slot) ? 2.5f : 6.5f;
-    float across = 0.f;  // metres to the team's left
-    if (slot == Slot::P1 || slot == Slot::P2) across = -3.f;
-    if (slot == Slot::P4 || slot == Slot::P5) across = 3.f;
-    return {sideSign(p.team) * depth, across * leftSign(p.team), 0.f};
+    return {sideSign(p.team) * depth, slotAcross(slot) * leftSign(p.team), 0.f};
+}
+
+Vec3 RallySim::formationPosition(int player) const {
+    const SimPlayer& p = players_[player];
+    const RotationManager& rm = *rotation_[static_cast<int>(p.team)];
+    const Slot slot = *rm.slotOf(p.id);
+    const float own = sideSign(p.team);
+    const float left = leftSign(p.team);
+    const bool front = isFrontRow(slot);
+    const float across = slotAcross(slot);
+
+    if (pending_.active && pending_.team == p.team) {
+        // Our ball: the setter goes to the net and hitters back off to approach.
+        if (rm.at(slot).role == Role::Setter) return {own * 1.2f, -1.f * left, 0.f};
+        return {own * (front ? 3.6f : 6.8f), across * left, 0.f};
+    }
+    // Their ball: the front row closes the net and the back row digs deep.
+    return {own * (front ? 0.9f : 6.3f), (front ? across : across * 0.9f) * left, 0.f};
 }
 
 void RallySim::startRally() {
     phase_ = RallyPhase::PreServe;
     timer_ = 0.f;
     charging_ = false;
+    tossing_ = false;
+    tossTime_ = 0.f;
     chargeTime_ = 0.f;
     pending_ = {};
     block_ = {};
@@ -189,26 +244,40 @@ void RallySim::step(float dt, const SimInput& input) {
 
 void RallySim::updatePreServe(float dt, const SimInput& input, bool pressed) {
     timer_ += dt;
-    const int server = serverIndex();
+    SimPlayer& server = players_[serverIndex()];
     const bool human = isHumanTeam(serving_);
 
     if (human) {
-        serveAim_ = std::clamp(serveAim_ + input.moveY * 4.f * dt, -kCourtHalfWidth + 0.1f, kCourtHalfWidth - 0.1f);
+        if (!tossing_) serveAim_ = std::clamp(serveAim_ + input.moveY * 4.f * dt, -kCourtHalfWidth + 0.1f, kCourtHalfWidth - 0.1f);
         if (!charging_ && pressed && timer_ >= kServeDelay) charging_ = true;
     } else if (!charging_ && timer_ >= kCpuServeDelay) {
         charging_ = true;
     }
-    if (charging_) chargeTime_ += dt;
 
-    const Vec3 hands = players_[server].pos;
-    const float toss = charging_ ? std::min(chargeTime_ / kTossTime, 1.f) : 0.f;
-    ball_.pos = {hands.x - sideSign(serving_) * 0.3f, hands.y, 1.1f + (kServeHeight - 1.1f) * toss};
+    if (charging_ && !tossing_) {
+        chargeTime_ += dt;
+        // The ball stays in the hands until the power is locked in.
+        if (!human || !input.action) {
+            tossing_ = true;
+        }
+    }
+
+    float height = 1.1f;
+    if (tossing_) {
+        tossTime_ += dt;
+        const float u = std::min(tossTime_ / kTossTime, 1.f);
+        height += (kServeHeight - 1.1f) * std::sin(u * 1.5707963f);
+        if (tossTime_ >= 0.12f) jump(server, kServeHop);
+    }
+    ball_.pos = {server.pos.x - sideSign(serving_) * 0.3f, server.pos.y, height};
     ball_.vel = {};
 
-    if (human) {
-        if (charging_ && !input.action) serveHuman(serveGauge());
-    } else if (charging_ && chargeTime_ >= kTossTime) {
-        serveCpu();
+    if (tossing_ && tossTime_ >= kTossTime) {
+        if (human) {
+            serveHuman(serveGauge());
+        } else {
+            serveCpu();
+        }
     }
 }
 
@@ -226,6 +295,7 @@ void RallySim::serveCpu() {
 
 void RallySim::serveAt(Vec3 target, float netMargin) {
     charging_ = false;
+    tossing_ = false;
     phase_ = RallyPhase::InPlay;
     const float fastest = 0.95f - 0.12f * skillBoost(serving_, Skill::Serve);
     const float t = std::max(flightTimeClearingNet(ball_.pos, target, netMargin), fastest);
@@ -252,6 +322,8 @@ void RallySim::launch(Team team, int player, ContactKind kind, ContactQuality qu
     e.player = player;
     e.kind = kind;
     e.quality = quality;
+    e.where = ball_.pos;
+    e.stretched = stretching_;
     events_.push_back(e);
 
     assignNext();
@@ -268,7 +340,9 @@ int RallySim::chooseReceiver(Team team, int touch, Vec3 point, bool spikeable) c
         if (touch == 3 && spikeable && !isFrontRow(*rm.slotOf(id))) continue;
 
         float cost = flatDistance(players_[i].pos, point);
-        if (touch == 2 && rm.at(*rm.slotOf(id)).role == Role::Setter) cost -= 2.f;
+        const bool setter = rm.at(*rm.slotOf(id)).role == Role::Setter;
+        if (touch == 2 && setter) cost -= 2.f;
+        if (touch == 1 && setter) cost += 1.5f;
         if (cost < bestCost) {
             bestCost = cost;
             best = i;
@@ -314,6 +388,8 @@ void RallySim::assignNext() {
     pending_.touch = touch;
     pending_.timeToContact = contactTime;
     pending_.point = point;
+    pending_.spike = touch == 3 && spikeable;
+    pending_.pressLead = pending_.spike ? kJumpLead : 0.f;
     if (isHumanTeam(side)) controlled_ = receiver;
     if (touch == 3 && spikeable && !block_.active) startBlock(other(side), point, contactTime);
 }
@@ -337,6 +413,7 @@ void RallySim::startBlock(Team team, Vec3 attackPoint, float timeToContact) {
     block_.team = team;
     block_.player = best;
     block_.timeToContact = timeToContact;
+    block_.pressLead = kBlockLead;
     block_.attackPoint = attackPoint;
     block_.shade = (rand01() * 2.f - 1.f) * 0.8f;
     if (isHumanTeam(team)) controlled_ = best;
@@ -345,36 +422,40 @@ void RallySim::startBlock(Team team, Vec3 attackPoint, float timeToContact) {
 bool RallySim::updateBlock(float dt, bool pressed) {
     if (!block_.active) return false;
     block_.timeToContact -= dt;
-    if (block_.committed) block_.jumpTime += dt;
 
     bool usedPress = false;
     if (!block_.committed) {
+        const float error = block_.timeToContact - kBlockLead;
         if (isHumanTeam(block_.team)) {
-            if (pressed && block_.timeToContact <= kShankWindow) {
-                if (const auto quality = gradeTiming(block_.timeToContact)) {
+            if (pressed) {
+                if (const auto quality = gradeTiming(error)) {
                     block_.committed = true;
                     block_.quality = *quality;
                     usedPress = true;
                 }
             }
-        } else if (block_.timeToContact <= 0.05f) {
+        } else if (error <= 0.05f) {
             const float r = rand01();
             block_.committed = true;
             block_.quality = r < 0.1f + 0.2f * config_.cpuSkill ? ContactQuality::Perfect
                              : r < 0.3f + 0.4f * config_.cpuSkill ? ContactQuality::Good
                                                                   : ContactQuality::Shank;
         }
+        if (block_.committed) jump(players_[block_.player], kBlockJumpHeight);
     }
     if (block_.timeToContact < -0.5f) block_.active = false;  // the attack never came
     return usedPress;
+}
+
+float RallySim::blockReach(Team team) const {
+    return kBlockReach * (1.f + 0.3f * skillBoost(team, Skill::Block));
 }
 
 void RallySim::resolveBlock(Vec3 crossing) {
     const BlockAttempt attempt = block_;
     block_.active = false;
     if (!attempt.committed || lastKind_ != ContactKind::Attack) return;
-    const float reach = kBlockReach * (1.f + 0.3f * skillBoost(attempt.team, Skill::Block));
-    if (std::fabs(crossing.y - players_[attempt.player].pos.y) > reach || crossing.z > kBlockTop) return;
+    if (std::fabs(crossing.y - players_[attempt.player].pos.y) > blockReach(attempt.team) || crossing.z > kBlockTop) return;
 
     const float own = sideSign(attempt.team);
     if (attempt.quality == ContactQuality::Shank) {
@@ -388,7 +469,7 @@ void RallySim::resolveBlock(Vec3 crossing) {
         from.x = -own * 0.15f;
         ball_.pos = from;
         const Vec3 target{-own * (1.5f + rand01() * 3.f), std::clamp(crossing.y, -4.f, 4.f), kBallRadius};
-        launch(attempt.team, attempt.player, ContactKind::Block, attempt.quality, launchVelocity(from, target, 0.45f));
+        launch(attempt.team, attempt.player, ContactKind::Block, attempt.quality, launchVelocity(from, target, 0.75f));
     } else {
         // Soft touch up on the blocker's side, playable by their team.
         from.x = own * 0.15f;
@@ -400,9 +481,10 @@ void RallySim::resolveBlock(Vec3 crossing) {
 
 ContactQuality RallySim::cpuQuality() {
     const float speed = std::sqrt(ball_.vel.x * ball_.vel.x + ball_.vel.y * ball_.vel.y + ball_.vel.z * ball_.vel.z);
-    const float hard = pending_.touch == 1 ? std::clamp((speed - 12.f) / 8.f, 0.f, 1.f) : 0.f;
+    const float hard = pending_.touch == 1 ? std::clamp((speed - 10.f) / 8.f, 0.f, 1.f) : 0.f;
     const float perfect = (0.25f + 0.45f * config_.cpuSkill) * (1.f - 0.7f * hard);
-    const float shank = 0.25f - 0.2f * config_.cpuSkill + 0.35f * hard;
+    const float serveBonus = lastKind_ == ContactKind::Serve ? 0.3f : 0.f;
+    const float shank = 0.25f - 0.2f * config_.cpuSkill + 0.35f * hard + serveBonus;
     const float r = rand01();
     if (r < perfect) return ContactQuality::Perfect;
     return r < 1.f - shank ? ContactQuality::Good : ContactQuality::Shank;
@@ -413,7 +495,7 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
     const Team team = contact.team;
     const float own = sideSign(team);
     const bool human = isHumanTeam(team);
-    Vec3 from = ball_.pos;
+    const Vec3 from = ball_.pos;
 
     if (contact.touch == 1) {
         const float accuracy = 1.f - 0.45f * skillBoost(team, Skill::Pass);
@@ -432,13 +514,6 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
         return;
     }
 
-    // Judged at the planned contact, so a slightly late press is a weaker spike
-    // rather than a free ball. The hitter meets the ball at the top of the jump.
-    const bool spikeable = contact.point.z >= kMinSpikeHeight && std::fabs(contact.point.x) <= kMaxSpikeDistance;
-    if (spikeable) {
-        from.z = std::max(from.z, kMinSpikeHeight + 0.2f);
-        ball_.pos = from;
-    }
     float across = (rand01() * 2.f - 1.f) * 3.8f;
     float depth = 3.f + rand01() * 5.2f;
     if (human) {
@@ -464,7 +539,7 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
         }
     }
 
-    if (!spikeable) {
+    if (!contact.spike) {
         const Vec3 target{-own * 5.f, across, kBallRadius};
         launch(team, contact.player, ContactKind::FreeBall, quality, launchVelocity(from, target, flightTimeForApex(from, target, 4.5f)));
         return;
@@ -472,7 +547,7 @@ void RallySim::playContact(ContactQuality quality, const SimInput& aim) {
 
     const Vec3 target = Vec3{-own * depth, across, kBallRadius} + scatter(errorRadius(quality, 0.2f, 0.7f, 2.2f));
     float speed = quality == ContactQuality::Perfect ? 18.f : quality == ContactQuality::Good ? 14.f : 10.f;
-    speed *= human ? 1.f + 0.2f * skillBoost(team, Skill::Attack) : 1.f + (config_.cpuSkill - 0.7f) * 0.6f;
+    speed *= human ? 1.f + 0.2f * skillBoost(team, Skill::Attack) : 1.f + (config_.cpuSkill - 0.7f) * 0.9f;
     const float margin = quality == ContactQuality::Shank && rand01() < 0.4f ? -0.4f : 0.08f;
     const float t = std::max(flatDistance(from, target) / speed, flightTimeClearingNet(from, target, margin));
     launch(team, contact.player, ContactKind::Attack, quality, launchVelocity(from, target, t));
@@ -486,25 +561,51 @@ void RallySim::updateInPlay(float dt, const SimInput& input, bool pressed) {
         const bool human = isHumanTeam(pending_.team);
 
         std::optional<ContactQuality> quality;
-        bool attempted = false;
-        if (human) {
+        if (pending_.spike) {
+            // The press is the jump. The hit itself comes at the top of it.
+            const float error = pending_.timeToContact - kJumpLead;
+            if (!pending_.jumped) {
+                if (human) {
+                    if (pressed) {
+                        if (const auto graded = gradeTiming(error)) {
+                            pending_.jumped = true;
+                            pending_.jumpQuality = *graded;
+                        }
+                    }
+                } else if (error <= 0.f) {
+                    pending_.jumped = true;
+                    pending_.jumpQuality = cpuQuality();
+                }
+                if (pending_.jumped) jump(players_[pending_.player], kJumpHeight);
+            }
+            if (pending_.jumped && pending_.timeToContact <= 0.f) {
+                quality = pending_.jumpQuality;
+            } else if (!pending_.jumped && pending_.timeToContact < -kMissedJumpGrace) {
+                pending_.spike = false;  // never left the floor: bump it over instead
+                quality = ContactQuality::Shank;
+            }
+        } else if (human) {
             if (pressed && pending_.timeToContact <= kShankWindow) {
                 quality = gradeTiming(pending_.timeToContact);
-                attempted = quality.has_value();
             } else if (pending_.timeToContact < -kShankWindow) {
                 pending_.active = false;
             }
         } else if (pending_.timeToContact <= 0.f) {
             quality = cpuQuality();
-            attempted = true;
         }
 
-        if (attempted) {
-            const float reach = pending_.touch > 1 ? kPlayReach : human ? kPassReach : kCpuPassReach;
+        if (quality) {
+            const float reach = pending_.touch > 1 ? kPlayReach : human ? kPassReach : lastKind_ == ContactKind::Attack ? kCpuDigReach : kCpuPassReach;
             // Standing on the ring counts, even if a late press lets a fast ball go past.
             const Vec3 feet = players_[pending_.player].pos;
-            if (std::min(flatDistance(feet, ball_.pos), flatDistance(feet, pending_.point)) <= reach) {
+            const float gap = std::min(flatDistance(feet, ball_.pos), flatDistance(feet, pending_.point));
+            if (gap <= reach) {
+                stretching_ = pending_.touch == 1 && gap > kCleanReach;
+                if (stretching_) quality = *quality == ContactQuality::Perfect ? ContactQuality::Good : ContactQuality::Shank;
                 playContact(*quality, input);
+                stretching_ = false;
+            } else if (human && pending_.touch > 1 && !pending_.spike) {
+                // Pressed before arriving under the ball: wait and let them try again.
             } else {
                 SimEvent e;
                 e.type = SimEvent::Type::Whiff;
@@ -559,6 +660,7 @@ void RallySim::endRally(Team winner, PointReason reason) {
     hasLanding_ = false;
     ball_.vel = {ball_.vel.x * 0.5f, ball_.vel.y * 0.5f, ball_.pos.z <= kBallRadius ? std::fabs(ball_.vel.z) * 0.55f : ball_.vel.z};
 
+    pointWinner_ = winner;
     const bool clutch = score_.setPointFor().has_value();
     score_.awardPoint(winner);
     rotation_[0]->onRallyEnd(winner == Team::Home);
@@ -573,64 +675,93 @@ void RallySim::endRally(Team winner, PointReason reason) {
 }
 
 void RallySim::movePlayers(float dt, const SimInput& input) {
-    const float maxStep = kPlayerSpeed * dt;
-
     for (int i = 0; i < 12; ++i) {
         SimPlayer& p = players_[i];
+        const float own = sideSign(p.team);
+        const bool human = isHumanTeam(p.team);
+        const float rate = human ? kHumanAcceleration : kCpuAcceleration;
 
-        if (block_.active && block_.player == i) {
-            float y = p.pos.y;
-            if (!block_.committed) {
-                if (!isHumanTeam(p.team)) {
-                    y = block_.attackPoint.y + block_.shade;
-                } else if (controlled_ == i) {
-                    y = std::clamp(y + input.moveY * maxStep, -kCourtHalfWidth, kCourtHalfWidth);
+        // Nobody changes direction in the air.
+        if (p.pos.z <= 0.f && p.vz <= 0.f) {
+            const bool live = phase_ == RallyPhase::InPlay;
+            const bool chosen = live && pending_.active && pending_.player == i;
+            const bool server = phase_ == RallyPhase::PreServe && i == serverIndex();
+            const bool blocking = block_.active && block_.player == i;
+
+            if (blocking) {
+                float y = p.pos.y;
+                if (block_.committed) {
+                    accelerate(p, 0.f, 0.f, rate, dt);
+                } else {
+                    if (!human) y = block_.attackPoint.y + block_.shade;
+                    else if (controlled_ == i) y = p.pos.y + input.moveY * 1.5f;
+                    y = std::clamp(y, -kCourtHalfWidth, kCourtHalfWidth);
+                    steer(p, Vec3{own * kBlockerDepth, y, 0.f}, kPlayerSpeed, kHumanAcceleration, dt);
                 }
+            } else if (chosen && pending_.spike) {
+                // Hold the run-up spot, then attack the ball.
+                const Vec3 point = pending_.point;
+                if (pending_.timeToContact > kApproachTime) {
+                    steer(p, Vec3{point.x + own * kApproachBack, point.y, 0.f}, kFormationSpeed, rate, dt);
+                } else {
+                    steer(p, Vec3{point.x + own * kTakeoffBack, point.y, 0.f}, kApproachSpeed, kHumanAcceleration, dt);
+                }
+            } else if (chosen && pending_.touch > 1) {
+                steer(p, pending_.point, kPlayerSpeed + 0.5f, kHumanAcceleration, dt);
+            } else if (human && i == controlled_ && !server && (live || phase_ == RallyPhase::PreServe)) {
+                float x = input.moveX;
+                float y = input.moveY;
+                const float len = std::hypot(x, y);
+                if (len > 1.f) {
+                    x /= len;
+                    y /= len;
+                }
+                if (chosen && len < 0.1f && sinceContact_ >= kAssistDelay) {
+                    steer(p, pending_.point, kPlayerSpeed, kHumanAcceleration, dt);  // assist until the player steers
+                } else {
+                    accelerate(p, x * kPlayerSpeed, y * kPlayerSpeed, kHumanAcceleration, dt);
+                }
+            } else if (chosen) {
+                const float skillShift = config_.cpuSkill - 0.7f;  // 0.7 is the tuned baseline
+                const float reaction = (lastKind_ == ContactKind::Serve ? kCpuServeReaction : kCpuReaction) - skillShift * 0.4f;
+                if (sinceContact_ >= reaction) {
+                    steer(p, pending_.point, kCpuDefenceSpeed + skillShift * 2.f, rate, dt);
+                }
+            } else if (server) {
+                steer(p, Vec3{own * kServeX, basePosition(i).y, 0.f}, kJogSpeed, rate, dt);
+            } else if (live) {
+                steer(p, formationPosition(i), kFormationSpeed, rate, dt);
+            } else if (phase_ == RallyPhase::PreServe) {
+                steer(p, basePosition(i), kJogSpeed, rate, dt);
+            } else if (p.team == pointWinner_) {
+                // Winners come together for a moment.
+                const float angle = static_cast<float>(i % 6) * 1.0472f;
+                const Vec3 huddle{own * 4.f + std::cos(angle) * 0.9f, std::sin(angle) * 0.9f, 0.f};
+                steer(p, huddle, kJogSpeed, rate, dt);
+            } else {
+                steer(p, basePosition(i), kWalkSpeed, rate, dt);
             }
-            moveToward(p.pos, Vec3{sideSign(p.team) * kBlockerDepth, y, 0.f}, maxStep);
-            const float u = std::min(block_.jumpTime / kBlockJumpTime, 1.f);
-            p.pos.z = kBlockJumpHeight * 4.f * u * (1.f - u);
-            continue;
         }
 
-        const bool chosen = phase_ == RallyPhase::InPlay && pending_.active && pending_.player == i;
-        const bool server = phase_ == RallyPhase::PreServe && i == serverIndex();
-        const bool humanFree = config_.humanHome && i == controlled_ && !server &&
-                               (phase_ == RallyPhase::InPlay || phase_ == RallyPhase::PreServe) &&
-                               !(chosen && pending_.touch > 1);  // sets and attacks position themselves
-
-        if (humanFree) {
-            float x = input.moveX;
-            float y = input.moveY;
-            const float len = std::hypot(x, y);
-            if (len > 1.f) {
-                x /= len;
-                y /= len;
+        p.pos.x += p.vel.x * dt;
+        p.pos.y += p.vel.y * dt;
+        if (p.pos.z > 0.f || p.vz > 0.f) {
+            p.pos.z += p.vz * dt;
+            p.vz -= kGravity * dt;
+            if (p.pos.z <= 0.f) {
+                p.pos.z = 0.f;
+                p.vz = 0.f;
+                p.vel = p.vel * 0.35f;  // absorbing the landing
             }
-            p.pos.x += x * maxStep;
-            p.pos.y += y * maxStep;
-            p.pos.x = sideSign(p.team) * std::clamp(std::fabs(p.pos.x), 0.2f, 13.f);
-            p.pos.y = std::clamp(p.pos.y, -8.f, 8.f);
-        } else if (chosen && pending_.touch == 1) {
-            const float skillShift = config_.cpuSkill - 0.7f;  // 0.7 is the tuned baseline
-            const float reaction = (lastKind_ == ContactKind::Serve ? kCpuServeReaction : kCpuReaction) - skillShift * 0.4f;
-            if (sinceContact_ >= reaction) moveToward(p.pos, pending_.point, (kCpuDefenceSpeed + skillShift * 2.f) * dt);
-        } else if (chosen) {
-            moveToward(p.pos, pending_.point, maxStep);
-        } else if (server) {
-            moveToward(p.pos, Vec3{sideSign(p.team) * kServeX, basePosition(i).y, 0.f}, maxStep);
-        } else {
-            moveToward(p.pos, basePosition(i), maxStep);
         }
 
-        const bool jumping = chosen && pending_.touch == 3 && pending_.point.z >= kMinSpikeHeight &&
-                             pending_.timeToContact < kJumpLead;
-        if (jumping) {
-            const float t = pending_.timeToContact / kJumpLead;
-            p.pos.z = std::max(kJumpHeight * (1.f - t * t), 0.f);
-        } else {
-            p.pos.z = std::max(p.pos.z - 3.f * dt, 0.f);
+        // Stay on your own side of the net and inside the hall.
+        if (p.pos.x * own < 0.2f) {
+            p.pos.x = own * 0.2f;
+            p.vel.x = 0.f;
         }
+        p.pos.x = std::clamp(p.pos.x, -13.f, 13.f);
+        p.pos.y = std::clamp(p.pos.y, -8.f, 8.f);
     }
 }
 

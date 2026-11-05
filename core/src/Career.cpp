@@ -9,7 +9,6 @@ namespace vc26 {
 
 namespace {
 
-constexpr int kMaxSkill = 99;
 constexpr int kPromotionInterest = 100;
 
 const char* const kRivals[3][7] = {
@@ -115,18 +114,17 @@ int leaguePoints(int setsFor, int setsAgainst) {
 
 Career::Career(std::string name, Archetype archetype, std::uint32_t seed)
     : name_(std::move(name)), archetype_(archetype), rng_(seed ? seed : 1u) {
-    skills_.fill(50);
-    const Specialty& specialty = kSpecialties[static_cast<int>(archetype)];
-    skills_[static_cast<int>(specialty.first)] += 12;
-    skills_[static_cast<int>(specialty.second)] += 6;
+    skills_ = startingSkills(archetype);
     buildLeague();
 }
 
-float Career::rand01() {
-    rng_ ^= rng_ << 13;
-    rng_ ^= rng_ >> 17;
-    rng_ ^= rng_ << 5;
-    return static_cast<float>(rng_ >> 8) / 16777216.f;
+SkillRatings Career::startingSkills(Archetype archetype) {
+    SkillRatings skills;
+    skills.fill(50);
+    const Specialty& specialty = kSpecialties[static_cast<int>(archetype)];
+    skills[static_cast<int>(specialty.first)] += 12;
+    skills[static_cast<int>(specialty.second)] += 6;
+    return skills;
 }
 
 int Career::overall() const {
@@ -223,6 +221,7 @@ MatchReport Career::recordMatch(int setsFor, int setsAgainst, const MatchStats& 
     report.won = setsFor > setsAgainst;
     report.setsFor = setsFor;
     report.setsAgainst = setsAgainst;
+    report.stats = stats;
     report.rating = matchRating(stats, report.won);
     report.skillPoints = std::max(1, static_cast<int>(std::lround((report.rating - 5.f) / 1.5f))) + (report.won ? 1 : 0);
     report.scoutGain = std::max(0, static_cast<int>(std::lround((report.rating - 5.5f) * 5.f)));
@@ -270,7 +269,7 @@ void Career::startNextSeason() {
 }
 
 int Career::upgradeCost(Skill s) const {
-    return 1 + (skills_[static_cast<int>(s)] - 40) / 15;
+    return 1 + (skills_[static_cast<int>(s)] - kMinSkill) / 15;
 }
 
 bool Career::upgrade(Skill s) {
@@ -317,6 +316,11 @@ std::optional<Career> Career::load(const std::string& text) {
         in >> t.strength >> t.played >> t.won >> t.lost >> t.setsFor >> t.setsAgainst >> t.points;
     }
     if (in.fail() || archetype < 0 || archetype >= kArchetypes || tier < 0 || tier > 2 || stage < 0 || stage > 2) return std::nullopt;
+    const bool skillsOk = std::all_of(c.skills_.begin(), c.skills_.end(), [](int s) { return s >= kMinSkill && s <= kMaxSkill; });
+    if (!skillsOk || c.rng_ == 0 || c.round_ < 0 || c.round_ > kRounds || c.season_ < 1 || c.scout_ < 0 || c.scout_ > kPromotionInterest ||
+        c.skillPoints_ < 0 || c.trophies_ < 0 || c.matches_ < 0) {
+        return std::nullopt;
+    }
     c.archetype_ = static_cast<Archetype>(archetype);
     c.tier_ = static_cast<Tier>(tier);
     c.stage_ = static_cast<CareerStage>(stage);

@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "InputCoreTypes.h"
 #include "Misc/CommandLine.h"
@@ -61,7 +62,14 @@ AVC26Arena::AVC26Arena()
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(Root);
-	Camera->SetFieldOfView(65.f);  // GDD 1.1
+	Camera->SetFieldOfView(62.f);  // a little tighter than GDD 1.1, for the fixed broadcast view
+	FPostProcessSettings& Look = Camera->PostProcessSettings;
+	Look.bOverride_BloomIntensity = true;
+	Look.BloomIntensity = 0.7f;
+	Look.bOverride_VignetteIntensity = true;
+	Look.VignetteIntensity = 0.35f;
+	Look.bOverride_AmbientOcclusionIntensity = true;
+	Look.AmbientOcclusionIntensity = 0.7f;
 }
 
 void AVC26Arena::BeginPlay()
@@ -86,7 +94,7 @@ void AVC26Arena::BeginPlay()
 	// -VC26ShotDir=<folder> walks through every screen, saves a picture of each
 	// and quits. It never touches the real save.
 	FParse::Value(FCommandLine::Get(), TEXT("VC26ShotDir="), ShotDir);
-	bSkipSave = !ShotDir.IsEmpty();
+	bHasSave = ShotDir.IsEmpty() && FPaths::FileExists(SavePath());
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("VC26Autoplay")))
 	{
@@ -101,7 +109,6 @@ void AVC26Arena::StartBackgroundMatch()
 	Config.seed = static_cast<std::uint32_t>(FDateTime::Now().GetTicks());
 	Config.humanHome = false;
 	Sim = MakeUnique<vc26::RallySim>(Config);
-	Stats = {};
 	bCareerMatch = false;
 	HomeName = TEXT("HOME");
 	AwayName = TEXT("AWAY");
@@ -163,31 +170,31 @@ void AVC26Arena::GoTo(EVC26Screen NewScreen)
 	MenuIndex = 0;
 }
 
-TArray<FString> AVC26Arena::GetMenuItems() const
+TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 {
-	TArray<FString> Items;
+	TArray<FVC26MenuItem> Items;
 	switch (Screen)
 	{
 	case EVC26Screen::MainMenu:
-		if (HasSave())
+		if (bHasSave)
 		{
-			Items.Add(TEXT("Continue Career"));
+			Items.Add({TEXT("Continue Career"), EVC26MenuAction::ContinueCareer});
 		}
-		Items.Add(TEXT("New Career"));
-		Items.Add(TEXT("Quick Match"));
-		Items.Add(TEXT("Quit"));
+		Items.Add({TEXT("New Career"), EVC26MenuAction::NewCareer});
+		Items.Add({TEXT("Quick Match"), EVC26MenuAction::QuickMatch});
+		Items.Add({TEXT("Quit"), EVC26MenuAction::Quit});
 		break;
 	case EVC26Screen::Hub:
-		Items.Add(Career.IsSet() && Career->stage() == vc26::CareerStage::Final ? TEXT("Play the Final") : TEXT("Play Next Match"));
-		Items.Add(TEXT("Upgrade Skills"));
-		Items.Add(TEXT("Main Menu"));
+		Items.Add({Career.IsSet() && Career->stage() == vc26::CareerStage::Final ? TEXT("Play the Final") : TEXT("Play Next Match"), EVC26MenuAction::PlayNext});
+		Items.Add({TEXT("Upgrade Skills"), EVC26MenuAction::OpenUpgrades});
+		Items.Add({TEXT("Main Menu"), EVC26MenuAction::ToMainMenu});
 		break;
 	case EVC26Screen::Upgrades:
 		for (int32 i = 0; i < vc26::kSkills; ++i)
 		{
-			Items.Add(UTF8_TO_TCHAR(vc26::toString(static_cast<vc26::Skill>(i))));
+			Items.Add({UTF8_TO_TCHAR(vc26::toString(static_cast<vc26::Skill>(i))), EVC26MenuAction::Upgrade, i});
 		}
-		Items.Add(TEXT("Back"));
+		Items.Add({TEXT("Back"), EVC26MenuAction::Back});
 		break;
 	default:
 		break;
@@ -197,71 +204,58 @@ TArray<FString> AVC26Arena::GetMenuItems() const
 
 void AVC26Arena::ConfirmMenu()
 {
-	const TArray<FString> Items = GetMenuItems();
-	const FString Choice = Items.IsValidIndex(MenuIndex) ? Items[MenuIndex] : FString();
-
+	// These screens have no list: Enter just moves on.
 	switch (Screen)
 	{
-	case EVC26Screen::MainMenu:
-		if (Choice == TEXT("Continue Career") && LoadCareer())
-		{
-			GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
-		}
-		else if (Choice == TEXT("New Career"))
-		{
-			GoTo(EVC26Screen::CreatePlayer);
-		}
-		else if (Choice == TEXT("Quick Match"))
-		{
-			StartMatch(false);
-		}
-		else if (Choice == TEXT("Quit"))
-		{
-			FPlatformMisc::RequestExit(false, TEXT("VC26 menu"));
-		}
-		break;
 	case EVC26Screen::CreatePlayer:
+		// Keeps the previous career, in case this one was started by mistake.
+		if (bHasSave)
+		{
+			IFileManager::Get().Copy(*(SavePath() + TEXT(".bak")), *SavePath());
+		}
 		Career.Emplace(std::string("The Rookie"), GetChosenArchetype(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
 		SaveCareer();
 		GoTo(EVC26Screen::Hub);
-		break;
-	case EVC26Screen::Hub:
-		if (MenuIndex == 0)
-		{
-			StartMatch(true);
-		}
-		else if (MenuIndex == 1)
-		{
-			GoTo(EVC26Screen::Upgrades);
-		}
-		else
-		{
-			GoTo(EVC26Screen::MainMenu);
-		}
-		break;
-	case EVC26Screen::Upgrades:
-		if (MenuIndex < vc26::kSkills)
-		{
-			if (Career->upgrade(static_cast<vc26::Skill>(MenuIndex)))
-			{
-				SaveCareer();
-			}
-		}
-		else
-		{
-			GoTo(EVC26Screen::Hub);
-		}
-		break;
+		return;
 	case EVC26Screen::Report:
 		GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
-		break;
+		return;
 	case EVC26Screen::SeasonEnd:
 		Career->startNextSeason();
 		SaveCareer();
 		GoTo(EVC26Screen::Hub);
-		break;
+		return;
 	default:
 		break;
+	}
+
+	const TArray<FVC26MenuItem> Items = GetMenuItems();
+	if (!Items.IsValidIndex(MenuIndex))
+	{
+		return;
+	}
+	const FVC26MenuItem& Item = Items[MenuIndex];
+	switch (Item.Action)
+	{
+	case EVC26MenuAction::ContinueCareer:
+		if (LoadCareer())
+		{
+			GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
+		}
+		break;
+	case EVC26MenuAction::NewCareer: GoTo(EVC26Screen::CreatePlayer); break;
+	case EVC26MenuAction::QuickMatch: StartMatch(false); break;
+	case EVC26MenuAction::Quit: FPlatformMisc::RequestExit(false, TEXT("VC26 menu")); break;
+	case EVC26MenuAction::PlayNext: StartMatch(true); break;
+	case EVC26MenuAction::OpenUpgrades: GoTo(EVC26Screen::Upgrades); break;
+	case EVC26MenuAction::ToMainMenu: GoTo(EVC26Screen::MainMenu); break;
+	case EVC26MenuAction::Upgrade:
+		if (Career->upgrade(static_cast<vc26::Skill>(Item.Arg)))
+		{
+			SaveCareer();
+		}
+		break;
+	case EVC26MenuAction::Back: GoTo(EVC26Screen::Hub); break;
 	}
 }
 
@@ -321,17 +315,13 @@ void AVC26Arena::UpdateMenus()
 	}
 }
 
-void AVC26Arena::SaveCareer() const
+void AVC26Arena::SaveCareer()
 {
-	if (Career.IsSet() && !bSkipSave)
+	if (Career.IsSet() && ShotDir.IsEmpty())
 	{
 		FFileHelper::SaveStringToFile(FString(UTF8_TO_TCHAR(Career->save().c_str())), *SavePath(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		bHasSave = true;
 	}
-}
-
-bool AVC26Arena::HasSave() const
-{
-	return !bSkipSave && FPaths::FileExists(SavePath());
 }
 
 bool AVC26Arena::LoadCareer()
@@ -345,6 +335,7 @@ bool AVC26Arena::LoadCareer()
 	if (!Loaded)
 	{
 		UE_LOG(LogVC26, Warning, TEXT("The career save could not be read"));
+		bHasSave = false;  // takes Continue off the menu; the file stays for recovery
 		return false;
 	}
 	Career.Emplace(*Loaded);
@@ -448,7 +439,15 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	{
 		if (Player->WasInputKeyJustPressed(EKeys::Escape))
 		{
-			LeaveMatch();
+			// A finished match always counts, so a loss can't be walked away from.
+			if (Sim->phase() == vc26::RallyPhase::MatchOver)
+			{
+				FinishMatch();
+			}
+			else
+			{
+				LeaveMatch();
+			}
 		}
 		else if (Sim->humanHome() && !bCareerMatch)
 		{
@@ -463,7 +462,11 @@ void AVC26Arena::Tick(float DeltaSeconds)
 		}
 	}
 
-	const vc26::SimInput Input = Screen == EVC26Screen::Match ? ReadInput() : vc26::SimInput();
+	vc26::SimInput Input = Screen == EVC26Screen::Match ? ReadInput() : vc26::SimInput();
+	if (!ShotDir.IsEmpty() && Sim->humanServing())
+	{
+		Input.action = FMath::Fmod(TourTime, 1.5f) < 0.6f;  // the tour serves for itself
+	}
 	if (Sim->phase() == vc26::RallyPhase::MatchOver)
 	{
 		if (Screen != EVC26Screen::Match || !Sim->humanHome())
@@ -471,11 +474,12 @@ void AVC26Arena::Tick(float DeltaSeconds)
 			StartBackgroundMatch();  // the match behind the menus just keeps going
 		}
 		else if (Player && (Player->WasInputKeyJustPressed(EKeys::SpaceBar) || Player->WasInputKeyJustPressed(EKeys::Enter) ||
-			Player->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom) || (bUseTouch && Touch.actionHeld())))
+			Player->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom) || (bUseTouch && Touch.actionHeld() && !bTouchWasHeld)))
 		{
 			FinishMatch();
 		}
 	}
+	bTouchWasHeld = bUseTouch && Touch.actionHeld();
 
 	// Fixed steps keep the timing windows and results independent of frame rate.
 	const float SimDelta = SlowMoLeft > 0.f ? DeltaSeconds * SlowMoScale : DeltaSeconds;
@@ -487,6 +491,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	}
 
 	SlowMoLeft = FMath::Max(SlowMoLeft - DeltaSeconds, 0.f);
+	Sounds.SetMuted(Screen != EVC26Screen::Match);  // the match behind the menus stays silent
 	HandleEvents();
 	SyncShapes(DeltaSeconds);
 	UpdateCamera(DeltaSeconds);
@@ -507,7 +512,6 @@ void AVC26Arena::SetBanner(const FString& Text)
 
 void AVC26Arena::HandleEvents()
 {
-	const bool bAudible = Screen == EVC26Screen::Match;
 	for (const vc26::SimEvent& Event : Sim->takeEvents())
 	{
 		vc26::recordEvent(Stats, Event);
@@ -550,12 +554,16 @@ void AVC26Arena::HandleEvents()
 				Swing = EPose::Block;
 				break;
 			}
-			Figures[Event.player].Swing = Swing;
-			Figures[Event.player].SwingLeft = 0.28f;
-			if (bAudible)
+			FFigure& Figure = Figures[Event.player];
+			Figure.Swing = Swing;
+			Figure.SwingLeft = 0.28f;
+			if (Event.stretched)
 			{
-				Sounds.Play(this, Sound, Volume, Pitch);
+				Figure.Swing = EPose::Dive;
+				Figure.SwingLeft = 0.75f;
+				Figure.DiveDirection = (SimToWorld(Event.where) - SimToWorld(Sim->players()[Event.player].pos)).GetSafeNormal2D();
 			}
+			Sounds.Play(this, Sound, Volume, Pitch);
 
 			if (Event.kind == vc26::ContactKind::Block)
 			{
@@ -574,24 +582,19 @@ void AVC26Arena::HandleEvents()
 			}
 			break;
 		case vc26::SimEvent::Type::NetHit:
-			if (bAudible)
-			{
-				Sounds.Play(this, EVC26Sound::Net);
-			}
+			Sounds.Play(this, EVC26Sound::Net);
 			SetBanner(TEXT("NET"));
 			break;
 		case vc26::SimEvent::Type::Point:
 		{
-			if (bAudible)
+			CrowdExcitement = FMath::Min(0.5f + Sim->contactsThisRally() / 12.f, 1.f);
+			if (Sim->ball().pos.z < 0.5f)
 			{
-				if (Sim->ball().pos.z < 0.5f)
-				{
-					Sounds.Play(this, EVC26Sound::Floor);
-				}
-				Sounds.Play(this, EVC26Sound::Whistle, 0.35f);
-				// Long rallies get the bigger reaction (GDD 4).
-				Sounds.Play(this, EVC26Sound::Cheer, 0.25f + 0.5f * FMath::Min(Sim->contactsThisRally() / 12.f, 1.f));
+				Sounds.Play(this, EVC26Sound::Floor);
 			}
+			Sounds.Play(this, EVC26Sound::Whistle, 0.35f);
+			// Long rallies get the bigger reaction (GDD 4).
+			Sounds.Play(this, EVC26Sound::Cheer, 0.25f + 0.5f * FMath::Min(Sim->contactsThisRally() / 12.f, 1.f));
 			SetBanner(FString::Printf(TEXT("%s  %s POINT"), ReasonText(Event.reason), Event.team == vc26::Team::Home ? *HomeName.ToUpper() : *AwayName.ToUpper()));
 
 			const vc26::MatchScore& Score = Sim->score();
@@ -606,17 +609,33 @@ void AVC26Arena::HandleEvents()
 void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 {
 	TourTime += DeltaSeconds;
+	auto Shot = [this](const TCHAR* Name)
+	{
+		FScreenshotRequest::RequestScreenshot(ShotDir / FString(Name) + TEXT(".png"), true, false);
+		UE_LOG(LogVC26, Log, TEXT("Tour shot: %s"), Name);
+	};
+
+	// The last steps wait for a moment in a live match, with a time limit.
+	if (TourStep == 16 || TourStep == 17)
+	{
+		const vc26::PendingContact& Pending = Sim->pending();
+		const bool bRing = TourStep == 16 && Pending.active && Pending.team == vc26::Team::Home && Pending.timeToContact < 0.5f;
+		const bool bBlock = TourStep == 17 && Sim->humanBlocking() && Sim->block().timeToContact < 0.6f;
+		if (bRing || bBlock || TourTime > 40.f)
+		{
+			Shot(TourStep == 16 ? TEXT("10_rings") : TEXT("11_block"));
+			++TourStep;
+			TourTime = 0.f;
+		}
+		return;
+	}
+
 	if (TourTime < 3.f)
 	{
 		return;
 	}
 	TourTime = 0.f;
 
-	auto Shot = [this](const TCHAR* Name)
-	{
-		FScreenshotRequest::RequestScreenshot(ShotDir / FString(Name) + TEXT(".png"), true, false);
-		UE_LOG(LogVC26, Log, TEXT("Tour shot: %s"), Name);
-	};
 	auto DemoStats = []()
 	{
 		vc26::MatchStats Demo;
@@ -667,7 +686,7 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 	case 12: StartBackgroundMatch(); GoTo(EVC26Screen::Match); break;
 	case 13: Shot(TEXT("7_match_a")); break;
 	case 14: Shot(TEXT("8_match_b")); break;
-	case 15: Shot(TEXT("9_match_c")); break;
+	case 15: Shot(TEXT("9_match_c")); StartMatch(false); break;
 	default: FPlatformMisc::RequestExit(false, TEXT("VC26 screenshot tour")); break;
 	}
 }

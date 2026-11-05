@@ -23,11 +23,20 @@ enum class PointReason : std::uint8_t { Ace, Kill, BallDown, Out, Antenna, Block
 // The human side's ratings, 40-99. 70 plays exactly like the untouched sim.
 enum class Skill : std::uint8_t { Serve, Pass, Set, Attack, Block };
 constexpr int kSkills = 5;
+constexpr int kMinSkill = 40;
+constexpr int kMaxSkill = 99;
+constexpr int kNeutralSkill = 70;
 using SkillRatings = std::array<int, kSkills>;
+
+// How far along the scale a rating is, 0..1, for meters.
+constexpr float skillFill(int rating) { return static_cast<float>(rating - kMinSkill) / static_cast<float>(kMaxSkill - kMinSkill); }
 
 // `error` is seconds before (+) or after (-) the ideal contact.
 // Empty when the press is too far off to touch the ball.
 VC26CORE_API std::optional<ContactQuality> gradeTiming(float error);
+
+// True if a player this far from a pass can take it without stretching.
+VC26CORE_API bool inCleanReach(Vec3 feet, Vec3 point);
 
 struct SimInput {
     float moveX = 0.f;    // towards the opponent, -1..1
@@ -39,6 +48,8 @@ struct SimPlayer {
     Team team = Team::Home;
     int id = -1;
     Vec3 pos;  // z is jump height
+    Vec3 vel;  // along the floor
+    float vz = 0.f;
 };
 
 struct SimEvent {
@@ -50,6 +61,8 @@ struct SimEvent {
     ContactQuality quality = ContactQuality::Good;
     PointReason reason = PointReason::Kill;
     bool clutch = false;  // the point was played with a set on the line
+    Vec3 where;           // for contacts, where the ball was
+    bool stretched = false;  // a pass taken at full stretch, which lost a grade
 };
 
 // The next touch the sim expects.
@@ -60,21 +73,25 @@ struct PendingContact {
     int touch = 1;             // 1 pass, 2 set, 3 attack
     float timeToContact = 0.f; // negative once the ideal moment has passed
     Vec3 point;
+    bool spike = false;    // a press is a jump, and the hit follows at contact
+    float pressLead = 0.f; // the ideal press comes this long before contact
+    bool jumped = false;
+    ContactQuality jumpQuality = ContactQuality::Good;
 };
 
-// A front-row player meeting an attack at the net (GDD 1.6). Timing is graded
-// against the hitter's contact: Perfect is a roof block, Good a recoverable
+// A front-row player meeting an attack at the net (GDD 1.6). The jump is graded
+// against the moment just before the hitter's contact: Perfect is a roof block, Good a recoverable
 // touch, Shank lets the ball through and risks a net touch.
 struct BlockAttempt {
     bool active = false;
     Team team = Team::Home;
     int player = -1;            // index into players()
     float timeToContact = 0.f;  // until the hitter strikes the ball
+    float pressLead = 0.f;      // the ideal jump comes this long before that
     Vec3 attackPoint;
     float shade = 0.f;          // CPU blockers guess this far to one side
     bool committed = false;     // has jumped
     ContactQuality quality = ContactQuality::Good;
-    float jumpTime = 0.f;
 };
 
 class VC26CORE_API RallySim {
@@ -84,7 +101,7 @@ public:
         std::uint32_t seed = 1;
         bool humanHome = true;  // false: the CPU plays both teams
         float cpuSkill = 0.7f;  // 0..1
-        SkillRatings humanSkills = {70, 70, 70, 70, 70};
+        SkillRatings humanSkills = {kNeutralSkill, kNeutralSkill, kNeutralSkill, kNeutralSkill, kNeutralSkill};
     };
 
     explicit RallySim(const Config& config);
@@ -99,6 +116,7 @@ public:
     const PendingContact& pending() const { return pending_; }
     const BlockAttempt& block() const { return block_; }
     bool humanBlocking() const { return block_.active && !block_.committed && isHumanTeam(block_.team); }
+    float blockReach(Team team) const;  // metres either side of the blocker
     Team servingTeam() const { return serving_; }
     int controlled() const { return controlled_; }
     int server() const { return serverIndex(); }
@@ -113,6 +131,7 @@ public:
     bool serveCharging() const { return charging_; }
     float serveGauge() const;  // 0..1, sweeps while charging
     float serveAim() const { return serveAim_; }
+    Team pointWinner() const { return pointWinner_; }
 
     int contactsThisRally() const { return rallyContacts_; }
 
@@ -138,10 +157,11 @@ private:
     int serverIndex() const;
     int chooseReceiver(Team team, int touch, Vec3 point, bool spikeable) const;
     Vec3 basePosition(int player) const;
+    Vec3 formationPosition(int player) const;
     bool isHumanTeam(Team team) const { return config_.humanHome && team == Team::Home; }
     float skillBoost(Team team, Skill skill) const;  // about -1..1; 0 for CPU teams
     ContactQuality cpuQuality();
-    float rand01();
+    float rand01() { return nextRand01(rng_); }
     Vec3 scatter(float radius);
 
     Config config_;
@@ -157,6 +177,9 @@ private:
     bool prevAction_ = false;
 
     bool charging_ = false;
+    bool tossing_ = false;
+    float tossTime_ = 0.f;
+    Team pointWinner_ = Team::Home;
     float chargeTime_ = 0.f;
     float serveAim_ = 0.f;
 
@@ -171,6 +194,7 @@ private:
     int touches_ = 0;
     bool outsideAntenna_ = false;
     float sinceContact_ = 0.f;
+    bool stretching_ = false;
     int rallyContacts_ = 0;
     int controlled_ = 0;
 

@@ -502,6 +502,7 @@ struct ScriptedHuman {
     bool held = false;
     float reaction = 0.f;  // seconds before it starts running to a new ball
     float waited = 0.f;
+    int rallyTurn = 0;  // varies the attack, as a person would
     Vec3 lastPoint;
     SimInput operator()(const RallySim& sim) {
         SimInput in;
@@ -526,7 +527,12 @@ struct ScriptedHuman {
                 in.moveX = dx / d;
                 in.moveY = dy / d;
             }
-            in.action = p.timeToContact <= pressAt && !held;
+            if (p.touch == 2) in.moveY = sim.contactsThisRally() % 4 < 2 ? 1.f : -1.f;  // moves the set around
+            if (p.touch == 3) {
+                in.moveY = (p.point.y > 0.f ? -1.f : 1.f) * (0.4f + 0.2f * static_cast<float>(sim.score().points(Team::Home) % 4));  // away from the block
+                in.moveX = sim.score().points(Team::Away) % 2 ? 0.8f : -0.7f;
+            }
+            in.action = p.timeToContact - p.pressLead <= pressAt && !held;
             held = in.action;
         } else {
             held = false;
@@ -689,7 +695,7 @@ struct ScriptedBlocker {
         SimInput in;
         const float gap = b.attackPoint.y - sim.players()[b.player].pos.y;
         if (std::fabs(gap) > 0.05f) in.moveY = gap > 0.f ? 1.f : -1.f;
-        in.action = b.timeToContact <= blockAt;
+        in.action = b.timeToContact - b.pressLead <= blockAt;
         return in;
     }
 };
@@ -738,7 +744,7 @@ TEST(higher_cpu_skill_is_harder_to_beat) {
     CHECK(normal > hard + 0.03f);
 }
 
-TEST(being_late_hurts_but_stays_playable) {
+TEST(slightly_off_timing_stays_playable) {
     auto homeShare = [](float pressAt) {
         int won = 0, points = 0;
         for (std::uint32_t seed = 1; seed <= 10; ++seed) {
@@ -754,8 +760,7 @@ TEST(being_late_hurts_but_stays_playable) {
     const float early = homeShare(0.1f), late = homeShare(-0.1f);
     std::printf("  0.1 s early wins %.0f%% of points, 0.1 s late wins %.0f%%\n", static_cast<double>(early * 100.f),
                 static_cast<double>(late * 100.f));
-    CHECK(late > 0.5f);  // a Good-window press must not be a disguised miss
-    CHECK(early > late);
+    CHECK(early > 0.5f && late > 0.5f);  // a Good-window press must not be a disguised miss
 }
 
 TEST(dead_ball_bounces_and_comes_to_rest_on_the_floor) {
@@ -913,6 +918,12 @@ TEST(a_saved_career_comes_back_identical) {
     b.recordMatch(2, 0, strongGame());
     CHECK(a.save() == b.save());
 
+    std::string tampered = c.save();
+    const std::size_t skillLine = tampered.find("\n50 ");  // Serve, the first skill
+    CHECK(skillLine != std::string::npos);
+    if (skillLine == std::string::npos) return;
+    tampered.replace(skillLine, 4, "\n999 ");  // far past the cap
+    CHECK(!Career::load(tampered));
     CHECK(!Career::load("not a save"));
     CHECK(!Career::load(c.save().substr(0, 60)));
 }

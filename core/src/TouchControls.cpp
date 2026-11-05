@@ -9,7 +9,7 @@ namespace {
 constexpr float kStickRadius = 0.11f;   // share of screen height
 constexpr float kStickDeadZone = 0.15f;
 constexpr float kCornerWidth = 0.22f;   // the difficulty label's tap area, as shares of the screen
-constexpr float kCornerHeight = 0.1f;
+constexpr float kCornerHeight = 0.2f;
 }  // namespace
 
 void TouchControls::update(const TouchPoint* touches, int count, float screenWidth, float screenHeight) {

@@ -95,6 +95,10 @@ void FVC26Sounds::Init()
 
 void FVC26Sounds::Play(UObject* WorldContext, EVC26Sound Sound, float Volume, float Pitch)
 {
+	if (bMuted)
+	{
+		return;
+	}
 	const TArray<uint8>& Pcm = Clips[static_cast<int32>(Sound)];
 
 	USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>();
