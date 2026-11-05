@@ -42,7 +42,12 @@ Run `game/Play.bat`, or press **Play** in the editor. The arena is built at runt
 2. Run the engine's setup script. For a launcher install it's
    `C:\Program Files\Epic Games\UE_5.x\Engine\Extras\Android\SetupAndroid.bat`. It downloads the SDK, NDK and build tools versions that engine needs.
 3. Restart the editor. In *Project Settings → Platforms → Android*, click **Configure Now** and accept the SDK license.
-4. Turn on *Developer options* and *USB debugging* on your phone, connect it by USB, and choose **Platforms → Android → (your phone)** in the editor toolbar.
+4. Turn on *Developer options* and *USB debugging* on your phone, connect it by USB, and accept the prompt on the phone.
+5. Run `game/BuildAndroid.bat`. It builds the game and installs it on the phone. The first run takes a long time.
+
+If the build says Android isn't an available platform, open *Unreal Engine → Library* in the launcher, click the arrow next to 5.8, choose *Options*, tick **Android** and click *Apply*.
+
+On the phone, the left half of the screen is a stick that appears under your thumb, and the right half is the action button. Tap the difficulty label in the top left to change it. To try this layout on PC, run `Play.bat -VC26Touch`, where the mouse acts as one finger.
 
 Exact SDK, NDK and Android Studio versions change with each engine release. Epic keeps them on [Android Development Requirements](https://dev.epicgames.com/documentation/en-us/unreal-engine/android-development-requirements-for-unreal-engine).
 

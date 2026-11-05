@@ -10,6 +10,7 @@
 #include "vc26/RallySim.h"
 #include "vc26/RoleFit.h"
 #include "vc26/ServeFlight.h"
+#include "vc26/TouchControls.h"
 #include "vc26/RotationManager.h"
 
 using namespace vc26;
@@ -770,6 +771,74 @@ TEST(dead_ball_bounces_and_comes_to_rest_on_the_floor) {
         CHECK(sim.ball().pos.z >= kBallRadius);
     }
     CHECK(sawPointOver && peak > 0.2f);
+}
+
+// --- Touch controls ---------------------------------------------------------
+
+namespace {
+constexpr float kW = 2000.f, kH = 1000.f;
+void touch(TouchControls& c, std::vector<TouchPoint> fingers) {
+    c.update(fingers.data(), static_cast<int>(fingers.size()), kW, kH);
+}
+}  // namespace
+
+TEST(left_thumb_steers_from_where_it_lands) {
+    TouchControls c;
+    touch(c, {{1, 400.f, 600.f}});
+    CHECK(c.stickActive() && c.stickOriginX() == 400.f);
+    CHECK(c.input().moveX == 0.f && c.input().moveY == 0.f);
+
+    touch(c, {{1, 400.f, 490.f}});  // a full stick radius up the screen
+    CHECK(near(c.input().moveX, 1.f, 0.001f) && near(c.input().moveY, 0.f, 0.001f));
+    touch(c, {{1, 290.f, 600.f}});  // left of the screen is Home's left
+    CHECK(near(c.input().moveY, 1.f, 0.001f));
+    touch(c, {{1, 900.f, 600.f}});  // past the rim stays at full tilt
+    CHECK(near(c.input().moveY, -1.f, 0.001f));
+
+    touch(c, {});
+    CHECK(!c.stickActive() && c.input().moveY == 0.f);
+}
+
+TEST(tiny_thumb_movements_are_ignored) {
+    TouchControls c;
+    touch(c, {{1, 400.f, 600.f}});
+    touch(c, {{1, 410.f, 600.f}});
+    CHECK(c.input().moveY == 0.f);
+}
+
+TEST(both_thumbs_work_at_once) {
+    TouchControls c;
+    touch(c, {{1, 400.f, 600.f}});
+    touch(c, {{1, 400.f, 490.f}, {2, 1600.f, 600.f}});
+    CHECK(c.input().action && near(c.input().moveX, 1.f, 0.001f));
+    touch(c, {{1, 400.f, 490.f}});  // lifting one leaves the other alone
+    CHECK(!c.input().action && near(c.input().moveX, 1.f, 0.001f));
+}
+
+TEST(a_finger_keeps_its_job_across_the_screen) {
+    TouchControls c;
+    touch(c, {{1, 1600.f, 600.f}});
+    touch(c, {{1, 300.f, 600.f}});  // action finger slides left
+    CHECK(c.input().action && !c.stickActive());
+    touch(c, {});
+    touch(c, {{2, 400.f, 600.f}});
+    touch(c, {{2, 1800.f, 600.f}});  // stick finger slides right
+    CHECK(!c.input().action && c.stickActive());
+}
+
+TEST(second_finger_on_the_left_is_an_action) {
+    TouchControls c;
+    touch(c, {{1, 400.f, 600.f}});
+    touch(c, {{1, 400.f, 600.f}, {2, 700.f, 700.f}});
+    CHECK(c.input().action && c.stickOriginX() == 400.f);
+}
+
+TEST(corner_tap_changes_difficulty_once) {
+    TouchControls c;
+    touch(c, {{1, 100.f, 50.f}});
+    CHECK(c.difficultyTapped() && !c.stickActive() && !c.input().action);
+    touch(c, {{1, 100.f, 50.f}});
+    CHECK(!c.difficultyTapped());
 }
 
 TEST(human_block_quality_follows_the_timing) {

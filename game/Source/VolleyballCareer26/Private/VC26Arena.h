@@ -7,6 +7,7 @@
 #include "GameFramework/Pawn.h"
 #include "VC26Sounds.h"
 #include "vc26/RallySim.h"
+#include "vc26/TouchControls.h"
 #include "VC26Arena.generated.h"
 
 class UCameraComponent;
@@ -28,6 +29,7 @@ public:
 	const FString& GetBanner() const { return Banner; }
 	float GetBannerTimeLeft() const { return BannerTimeLeft; }
 	const TCHAR* GetDifficultyName() const;
+	const vc26::TouchControls* GetTouch() const { return bUseTouch ? &Touch : nullptr; }
 
 private:
 	enum class EPose : uint8 { Idle, Pass, Set, AttackWindUp, AttackSwing, Block, ServeToss };
@@ -48,6 +50,7 @@ private:
 	void BuildCourt();
 	void BuildLights();
 	void NewMatch();
+	void UpdateTouch();
 	vc26::SimInput ReadInput() const;
 	void HandleEvents();
 	void SyncShapes(float DeltaSeconds);
@@ -95,6 +98,8 @@ private:
 	float ShakeLeft = 0.f;
 	float SlowMoLeft = 0.f;
 	int32 Difficulty = 1;  // 0 easy, 1 normal, 2 hard
+	bool bUseTouch = false;
+	vc26::TouchControls Touch;
 	FFigure Figures[12];
 	FVC26Sounds Sounds;
 };

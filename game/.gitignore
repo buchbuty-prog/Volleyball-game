@@ -9,3 +9,4 @@ DerivedDataCache/
 .vscode/
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
+Build/

@@ -47,6 +47,36 @@ void AVC26Hud::DrawBar(float Y, float Marker, const TArray<FVector4f>& Zones)
 	DrawRect(FLinearColor::White, Left + FMath::Clamp(Marker, 0.f, 1.f) * Width - 3.f * Ui, Top - 6.f * Ui, 6.f * Ui, Height + 12.f * Ui);
 }
 
+void AVC26Hud::DrawCircle(float X, float Y, float Radius, const FLinearColor& Color, float Thickness)
+{
+	constexpr int32 Segments = 40;
+	for (int32 i = 0; i < Segments; ++i)
+	{
+		const float A = 2.f * PI * i / Segments;
+		const float B = 2.f * PI * (i + 1) / Segments;
+		DrawLine(X + FMath::Cos(A) * Radius, Y + FMath::Sin(A) * Radius, X + FMath::Cos(B) * Radius, Y + FMath::Sin(B) * Radius, Color, Thickness);
+	}
+}
+
+void AVC26Hud::DrawTouchControls(const vc26::TouchControls& Touch)
+{
+	const float Radius = 0.11f * Canvas->ClipY;
+	const FLinearColor Rim(1.f, 1.f, 1.f, 0.55f);
+	const FLinearColor Lit(1.f, 0.9f, 0.2f, 0.95f);
+
+	// The stick appears under the thumb. Until then, this shows where to put it.
+	const float StickX = Touch.stickActive() ? Touch.stickOriginX() : 0.16f * Canvas->ClipX;
+	const float StickY = Touch.stickActive() ? Touch.stickOriginY() : 0.72f * Canvas->ClipY;
+	DrawCircle(StickX, StickY, Radius, Rim, 3.f);
+	DrawCircle(StickX + Touch.stickX() * Radius, StickY + Touch.stickY() * Radius, Radius * 0.42f, Touch.stickActive() ? Lit : Rim, 4.f);
+
+	const float ButtonX = 0.84f * Canvas->ClipX;
+	const float ButtonY = 0.72f * Canvas->ClipY;
+	const bool bHeld = Touch.actionHeld();
+	DrawCircle(ButtonX, ButtonY, Radius, bHeld ? Lit : Rim, bHeld ? 6.f : 3.f);
+	DrawCircle(ButtonX, ButtonY, Radius * 0.42f, bHeld ? Lit : Rim, bHeld ? 6.f : 3.f);
+}
+
 void AVC26Hud::DrawHUD()
 {
 	Super::DrawHUD();
@@ -64,8 +94,14 @@ void AVC26Hud::DrawHUD()
 	DrawCentred(FString::Printf(TEXT("HOME  %d  -  %d  AWAY"), Score.points(Team::Home), Score.points(Team::Away)), 24.f, FLinearColor::White, 2.2f);
 	DrawCentred(FString::Printf(TEXT("Sets %d - %d   |   Set %d"), Score.sets(Team::Home), Score.sets(Team::Away), Score.setNumber()), 80.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.2f);
 
-	DrawText(FString::Printf(TEXT("%s  (1 Easy, 2 Normal, 3 Hard)"), Arena->GetDifficultyName()), FLinearColor(0.75f, 0.75f, 0.75f),
-		16.f, 16.f, GEngine->GetLargeFont(), Canvas->ClipY / 1080.f);
+	const vc26::TouchControls* Touch = Arena->GetTouch();
+	const bool bTouch = Touch != nullptr;
+	DrawText(FString::Printf(TEXT("%s  %s"), Arena->GetDifficultyName(), bTouch ? TEXT("(tap to change)") : TEXT("(1 Easy, 2 Normal, 3 Hard)")), FLinearColor(0.75f, 0.75f, 0.75f),
+		16.f, 16.f, GEngine->GetLargeFont(), (bTouch ? 1.6f : 1.f) * Canvas->ClipY / 1080.f);
+	if (bTouch)
+	{
+		DrawTouchControls(*Touch);
+	}
 
 	if (Arena->GetBannerTimeLeft() > 0.f)
 	{
@@ -76,7 +112,7 @@ void AVC26Hud::DrawHUD()
 	{
 		const bool bHomeWon = Score.winner() == Team::Home;
 		DrawCentred(bHomeWon ? TEXT("YOU WIN THE MATCH") : TEXT("AWAY WINS THE MATCH"), 440.f, FLinearColor::White, 3.f);
-		DrawCentred(TEXT("Press SPACE for a new match"), 530.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.4f);
+		DrawCentred(bTouch ? TEXT("Tap the right side for a new match") : TEXT("Press SPACE for a new match"), 530.f, FLinearColor(0.8f, 0.8f, 0.8f), 1.4f);
 		return;
 	}
 
@@ -87,7 +123,7 @@ void AVC26Hud::DrawHUD()
 
 	if (Sim->humanServing())
 	{
-		DrawCentred(TEXT("A / D aim.  Hold SPACE, release in the green zone"), 930.f, FLinearColor::White, 1.3f);
+		DrawCentred(bTouch ? TEXT("Left thumb aims. Hold the right side, release in the green") : TEXT("A / D aim.  Hold SPACE, release in the green zone"), 930.f, FLinearColor::White, 1.3f);
 		if (Sim->serveCharging())
 		{
 			// Red below 0.2 nets the serve; above 0.85 it goes long.
@@ -103,7 +139,7 @@ void AVC26Hud::DrawHUD()
 
 	if (Sim->humanBlocking())
 	{
-		DrawCentred(TEXT("BLOCK: A / D slides along the net, press SPACE as the hitter strikes"), 930.f, FLinearColor::White, 1.3f);
+		DrawCentred(bTouch ? TEXT("BLOCK: slide along the net, tap as the hitter strikes") : TEXT("BLOCK: A / D slides along the net, press SPACE as the hitter strikes"), 930.f, FLinearColor::White, 1.3f);
 		DrawBar(980.f, TimeToBar(Sim->block().timeToContact), TimingZones);
 		return;
 	}
@@ -111,9 +147,9 @@ void AVC26Hud::DrawHUD()
 	const vc26::PendingContact& Pending = Sim->pending();
 	if (Sim->phase() == vc26::RallyPhase::InPlay && Pending.active && Pending.team == Team::Home)
 	{
-		const TCHAR* Prompt = Pending.touch == 1 ? TEXT("PASS: get to the ring, press SPACE on the mark")
-			: Pending.touch == 2 ? TEXT("SET: A / D picks the hitter, press SPACE on the mark")
-			: TEXT("ATTACK: WASD aims, press SPACE on the mark");
+		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: get to the ring, tap on the mark") : TEXT("PASS: get to the ring, press SPACE on the mark"))
+			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb picks the hitter, tap on the mark") : TEXT("SET: A / D picks the hitter, press SPACE on the mark"))
+			: (bTouch ? TEXT("ATTACK: left thumb aims, tap on the mark") : TEXT("ATTACK: WASD aims, press SPACE on the mark"));
 		DrawCentred(Prompt, 930.f, FLinearColor::White, 1.3f);
 		DrawBar(980.f, TimeToBar(Pending.timeToContact), TimingZones);
 	}

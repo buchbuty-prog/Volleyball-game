@@ -190,6 +190,8 @@ void AVC26Arena::BeginPlay()
 	BuildCourt();
 	BuildLights();
 	Sounds.Init();
+	// -VC26Touch shows the phone controls on PC, with the mouse as one finger.
+	bUseTouch = PLATFORM_ANDROID || PLATFORM_IOS || FParse::Param(FCommandLine::Get(), TEXT("VC26Touch"));
 	NewMatch();
 }
 
@@ -216,6 +218,44 @@ void AVC26Arena::NewMatch()
 	bCameraReady = false;
 }
 
+void AVC26Arena::UpdateTouch()
+{
+	const APlayerController* Player = Cast<APlayerController>(GetController());
+	if (!bUseTouch || !Player)
+	{
+		return;
+	}
+
+	TArray<vc26::TouchPoint, TInlineAllocator<11>> Fingers;
+	for (int32 Finger = 0; Finger < 10; ++Finger)
+	{
+		float X = 0.f;
+		float Y = 0.f;
+		bool bDown = false;
+		Player->GetInputTouchState(static_cast<ETouchIndex::Type>(Finger), X, Y, bDown);
+		if (bDown)
+		{
+			Fingers.Add({Finger, X, Y});
+		}
+	}
+
+	float MouseX = 0.f;
+	float MouseY = 0.f;
+	if (!PLATFORM_ANDROID && Player->IsInputKeyDown(EKeys::LeftMouseButton) && Player->GetMousePosition(MouseX, MouseY))
+	{
+		Fingers.Add({100, MouseX, MouseY});
+	}
+
+	int32 Width = 0;
+	int32 Height = 0;
+	Player->GetViewportSize(Width, Height);
+	Touch.update(Fingers.GetData(), Fingers.Num(), static_cast<float>(Width), static_cast<float>(Height));
+	if (Touch.difficultyTapped())
+	{
+		SetDifficulty((Difficulty + 1) % 3);
+	}
+}
+
 vc26::SimInput AVC26Arena::ReadInput() const
 {
 	vc26::SimInput Input;
@@ -229,11 +269,17 @@ vc26::SimInput AVC26Arena::ReadInput() const
 
 	Input.moveX = (Held(EKeys::W, EKeys::Up) ? 1.f : 0.f) - (Held(EKeys::S, EKeys::Down) ? 1.f : 0.f);
 	Input.moveY = (Held(EKeys::A, EKeys::Left) ? 1.f : 0.f) - (Held(EKeys::D, EKeys::Right) ? 1.f : 0.f);
+	if (bUseTouch)
+	{
+		const vc26::SimInput Fingers = Touch.input();
+		Input.moveX += Fingers.moveX;
+		Input.moveY += Fingers.moveY;
+	}
 	Input.moveX += Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftY);
 	Input.moveY -= Player->GetInputAnalogKeyState(EKeys::Gamepad_LeftX);
 	Input.moveX = FMath::Clamp(Input.moveX, -1.f, 1.f);
 	Input.moveY = FMath::Clamp(Input.moveY, -1.f, 1.f);
-	Input.action = Held(EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom);
+	Input.action = Held(EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom) || (bUseTouch && Touch.actionHeld());
 	return Input;
 }
 
@@ -245,6 +291,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 		return;
 	}
 
+	UpdateTouch();
 	const vc26::SimInput Input = ReadInput();
 	if (Sim->phase() == vc26::RallyPhase::MatchOver && Input.action)
 	{
