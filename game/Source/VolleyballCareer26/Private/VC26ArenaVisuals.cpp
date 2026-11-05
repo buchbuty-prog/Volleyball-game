@@ -678,7 +678,7 @@ void AVC26Arena::UpdateRings()
 		TimeToPress = Block.timeToContact - Block.pressLead;
 		bReady = FMath::Abs(Sim->players()[Block.player].pos.y - Block.attackPoint.y) <= Sim->blockReach(Block.team);
 	}
-	else if (bHuman && Pending.active && Pending.team == vc26::Team::Home)
+	else if (bHuman && Sim->humanToPlay())
 	{
 		bShow = true;
 		bTiming = !Pending.jumped;

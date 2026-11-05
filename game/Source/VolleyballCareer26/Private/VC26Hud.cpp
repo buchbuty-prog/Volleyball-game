@@ -166,7 +166,7 @@ void AVC26Hud::DrawCreatePlayer(const AVC26Arena& Arena)
 		DrawMeter(760.f, Y + 14.f, 480.f, vc26::skillFill(Value), Value > 55 ? Gold : FLinearColor(0.35f, 0.5f, 0.8f));
 		Label(FString::FromInt(Value), 1270.f, Y, FLinearColor::White, 1.4f);
 	}
-	DrawCentred(TEXT("Left / Right to choose, Enter to start your career"), 820.f, Muted, 1.2f);
+	DrawCentred(TEXT("You play only your own position. Left / Right to choose, Enter to start"), 820.f, Muted, 1.2f);
 }
 
 void AVC26Hud::DrawTable(const vc26::Career& Career, float X, float Y)
@@ -215,7 +215,7 @@ void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
 	// Next match.
 	const vc26::LeagueTeam& Rival = Career.teams()[Career.nextOpponent()];
 	Panel(60.f, 180.f, 800.f, 200.f, Ink);
-	Label(TEXT("NEXT MATCH"), 84.f, 198.f, Gold, 1.3f);
+	Label(Career.isRivalMatch() ? FString::Printf(TEXT("RIVAL MATCH: %s"), *Str(vc26::Career::rivalName())) : FString(TEXT("NEXT MATCH")), 84.f, 198.f, Gold, 1.3f);
 	Label(FString::Printf(TEXT("vs  %s"), *Str(Rival.name)), 84.f, 244.f, FLinearColor::White, 2.f);
 	Label(FString::Printf(TEXT("Strength %d   |   %d-%d this season"), Rival.strength, Rival.won, Rival.lost), 84.f, 318.f, Muted, 1.2f);
 
@@ -227,6 +227,11 @@ void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
 
 	DrawItems(Arena, 60.f, 560.f, 800.f);
 	Label(FString::Printf(TEXT("Skill points: %d      Average rating: %.1f      Trophies: %d"), Career.skillPoints(), Career.averageRating(), Career.trophies()), 60.f, 780.f, FLinearColor::White, 1.2f);
+	Label(TEXT("Coach trust"), 60.f, 830.f, Muted, 1.05f);
+	DrawMeter(280.f, 840.f, 580.f, Career.coachTrust() / 100.f, FLinearColor(0.3f, 0.75f, 0.45f));
+	Label(TEXT("Chemistry"), 60.f, 868.f, Muted, 1.05f);
+	DrawMeter(280.f, 878.f, 580.f, Career.chemistry() / 100.f, FLinearColor(0.35f, 0.55f, 0.95f));
+	Label(FString::Printf(TEXT("vs %s: %d-%d"), *Str(vc26::Career::rivalName()), Career.rivalWins(), Career.rivalLosses()), 60.f, 906.f, Muted, 1.05f);
 
 	DrawTable(Career, 1000.f, 180.f);
 }
@@ -288,6 +293,21 @@ void AVC26Hud::DrawReport(const AVC26Arena& Arena, const vc26::Career& Career)
 		Label(FString::FromInt(Lines[i].Value), 1380.f, Y, FLinearColor::White, 1.4f);
 	}
 	DrawCentred(Arena.HasHighlights() ? TEXT("Press H for highlights, Enter to continue") : TEXT("Press Enter to continue"), 870.f, Muted, 1.2f);
+}
+
+void AVC26Hud::DrawStory(const AVC26Arena& Arena, const vc26::Career& Career)
+{
+	const vc26::StoryEvent* Story = Career.pendingStory();
+	if (!Story)
+	{
+		return;
+	}
+	Panel(360.f, 220.f, 1200.f, 620.f, Ink);
+	Panel(360.f, 220.f, 1200.f, 8.f, Gold);
+	DrawCentred(Str(Story->title), 262.f, Gold, 2.2f);
+	DrawCentred(Str(Story->text), 380.f, FLinearColor::White, 1.2f);
+	DrawItems(Arena, 460.f, 500.f, 1000.f);
+	DrawCentred(TEXT("Your answer changes how the coach and the team see you"), 720.f, Muted, 1.f);
 }
 
 void AVC26Hud::DrawSeasonEnd(const vc26::Career& Career)
@@ -414,7 +434,7 @@ void AVC26Hud::DrawMatch(const AVC26Arena& Arena, const vc26::RallySim& Sim)
 	}
 
 	const vc26::PendingContact& Pending = Sim.pending();
-	if (Sim.phase() == vc26::RallyPhase::InPlay && Pending.active && Pending.team == Team::Home)
+	if (Sim.phase() == vc26::RallyPhase::InPlay && Sim.humanToPlay())
 	{
 		const TCHAR* Prompt = Pending.touch == 1 ? (bTouch ? TEXT("PASS: tap as the rings meet") : TEXT("PASS: steer to the ring, SPACE as the rings meet"))
 			: Pending.touch == 2 ? (bTouch ? TEXT("SET: left thumb calls the play, tap as the rings meet") : TEXT("SET: A / D outside, W quick, S dump. SPACE as the rings meet"))
@@ -451,5 +471,6 @@ void AVC26Hud::DrawHUD()
 	case EVC26Screen::Upgrades: if (Career) { DrawUpgrades(*Arena, *Career); } break;
 	case EVC26Screen::Report: if (Career) { DrawReport(*Arena, *Career); } break;
 	case EVC26Screen::SeasonEnd: if (Career) { DrawSeasonEnd(*Career); } break;
+	case EVC26Screen::Story: if (Career) { DrawStory(*Arena, *Career); } break;
 	}
 }

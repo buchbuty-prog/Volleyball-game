@@ -35,7 +35,8 @@ enum class EVC26Screen : uint8
 	Upgrades,
 	Match,
 	Report,
-	SeasonEnd
+	SeasonEnd,
+	Story
 };
 
 enum class EVC26MenuAction : uint8
@@ -48,7 +49,8 @@ enum class EVC26MenuAction : uint8
 	OpenUpgrades,
 	ToMainMenu,
 	Upgrade,  // Arg is the skill
-	Back
+	Back,
+	StoryChoice  // Arg is the option
 };
 
 struct FVC26MenuItem
@@ -218,6 +220,7 @@ private:
 	int32 ReplayCursor = 0;
 	EVC26Screen ReplayReturn = EVC26Screen::Match;
 	int32 RallyExcitement = 0;
+	int32 LockedPlayer = -1;
 	float ReplayCountdown = -1.f;
 	float HeartbeatTimer = 0.f;
 	bool bPressureAnnounced = false;

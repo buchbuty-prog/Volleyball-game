@@ -1074,6 +1074,84 @@ TEST(better_skills_win_more) {
     CHECK(star > rookie + 0.04f);
 }
 
+TEST(be_a_pro_controls_one_player_and_rates_only_their_touches) {
+    Career career("A", Archetype::PowerSpiker, 2);
+    RallySim::Config c;
+    c.rules = Career::matchRules();
+    c.seed = 6;
+    c.lockedPlayer = career.lockedPlayer();
+    c.teammateSkill = career.teammateSkill();
+    RallySim sim(c);
+    ScriptedHuman player;
+    MatchStats mine, team;
+    int cpuHomeTouches = 0;
+    for (long i = 0; i < 4000000L && sim.phase() != RallyPhase::MatchOver; ++i) {
+        CHECK(sim.controlled() == c.lockedPlayer);
+        sim.step(kDt, player(sim));
+        for (const SimEvent& e : sim.takeEvents()) {
+            recordEvent(mine, e, c.lockedPlayer);
+            recordEvent(team, e);
+            cpuHomeTouches += e.type == SimEvent::Type::Contact && e.team == Team::Home && e.player != c.lockedPlayer;
+        }
+    }
+    CHECK(sim.phase() == RallyPhase::MatchOver);
+    CHECK(cpuHomeTouches > 0);  // teammates played the rest
+    CHECK(mine.perfect + mine.good + mine.shanks > 0);
+    CHECK(mine.perfect + mine.good + mine.shanks < team.perfect + team.good + team.shanks);
+    CHECK(mine.pointsWon == team.pointsWon);
+    std::printf("  Be a Pro match: %d of %d team touches, %d kills\n", mine.perfect + mine.good + mine.shanks,
+                team.perfect + team.good + team.shanks, mine.kills);
+}
+
+TEST(no_position_ever_turns_into_the_libero) {
+    for (int a = 0; a < kArchetypes; ++a) {
+        const int body = Career("A", static_cast<Archetype>(a), 1).lockedPlayer() + 1;
+        CHECK(body != 3 && body != 6);  // the libero swaps with the middles
+    }
+}
+
+TEST(story_choices_change_the_career) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    bool sawStory = false;
+    while (c.stage() != CareerStage::SeasonOver) {
+        c.recordMatch(2, 0, strongGame());
+        if (const StoryEvent* story = c.pendingStory()) {
+            sawStory = true;
+            const int before = c.chemistry() + c.coachTrust() + c.scoutInterest() + c.skillPoints();
+            c.chooseStory(0);
+            CHECK(!c.pendingStory());
+            CHECK(c.chemistry() + c.coachTrust() + c.scoutInterest() + c.skillPoints() != before || story->trust[0] == 0);
+        }
+    }
+    CHECK(sawStory);
+    CHECK(c.rivalWins() == 1);  // they meet once in the league (the final can add one more)
+}
+
+TEST(better_chemistry_means_better_teammates) {
+    Career low("A", Archetype::PowerSpiker, 5), high("A", Archetype::PowerSpiker, 5);
+    while (low.round() < 2) {
+        low.recordMatch(2, 0, strongGame());
+        high.recordMatch(2, 0, strongGame());
+        if (low.pendingStory()) {
+            low.chooseStory(1);
+            high.chooseStory(0);
+        }
+    }
+    CHECK(high.teammateSkill() > low.teammateSkill());
+}
+
+TEST(old_saves_still_load) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    std::string text = c.save();
+    text.replace(0, 12, "vc26career 1");
+    const std::size_t extras = text.find("50 50 0 0 -1\n");
+    CHECK(extras != std::string::npos);
+    if (extras == std::string::npos) return;
+    text.erase(extras, 13);
+    const std::optional<Career> old = Career::load(text);
+    CHECK(old.has_value() && old->coachTrust() == 50);
+}
+
 // --- Touch controls ---------------------------------------------------------
 
 namespace {

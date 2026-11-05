@@ -34,8 +34,9 @@ struct MatchStats {
     int pointsLost = 0;
 };
 
-// Adds up the Home side's match from the sim's events.
-VC26CORE_API void recordEvent(MatchStats& stats, const SimEvent& event);
+// Adds up the Home side's match from the sim's events. With a locked player,
+// touches, kills and errors count only when that player made them.
+VC26CORE_API void recordEvent(MatchStats& stats, const SimEvent& event, int lockedPlayer = -1);
 
 // GDD 2.A: 1.0-10.0, weighing efficiency, errors and clutch points.
 VC26CORE_API float matchRating(const MatchStats& stats, bool won);
@@ -66,6 +67,17 @@ struct MatchReport {
 
 enum class CareerStage : std::uint8_t { League, Final, SeasonOver };
 
+// A decision between matches, with what each answer does.
+struct StoryEvent {
+    const char* title;
+    const char* text;
+    const char* options[2];
+    int trust[2];       // the coach
+    int chemistry[2];   // the locker room
+    int scout[2];
+    int skillPoints[2];
+};
+
 class VC26CORE_API Career {
 public:
     static constexpr int kTeams = 8;
@@ -87,6 +99,19 @@ public:
     int scoutInterest() const { return scout_; }  // 0-100
     int trophies() const { return trophies_; }
     int matchesPlayed() const { return matches_; }
+    int coachTrust() const { return trust_; }   // 0-100
+    int chemistry() const { return chemistry_; }  // 0-100
+    static const char* rivalName();
+    bool isRivalMatch() const;
+    int rivalWins() const { return rivalWins_; }
+    int rivalLosses() const { return rivalLosses_; }
+    const StoryEvent* pendingStory() const;
+    void chooseStory(int option);
+
+    // Be a Pro: which Home body is this player, and how well the team plays around them.
+    int lockedPlayer() const;
+    float teammateSkill() const;
+
     float averageRating() const { return matches_ ? ratingTotal_ / static_cast<float>(matches_) : 0.f; }
     bool wonFinal() const { return wonFinal_; }
     bool promoted() const { return promoted_; }
@@ -133,6 +158,11 @@ private:
     int trophies_ = 0;
     int matches_ = 0;
     float ratingTotal_ = 0.f;
+    int trust_ = 50;
+    int chemistry_ = 50;
+    int rivalWins_ = 0;
+    int rivalLosses_ = 0;
+    int story_ = -1;
     bool wonFinal_ = false;
     bool promoted_ = false;
     std::array<LeagueTeam, kTeams> teams_{};

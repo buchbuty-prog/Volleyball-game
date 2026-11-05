@@ -103,6 +103,8 @@ public:
         bool humanHome = true;  // false: the CPU plays both teams
         float cpuSkill = 0.7f;  // 0..1
         SkillRatings humanSkills = {kNeutralSkill, kNeutralSkill, kNeutralSkill, kNeutralSkill, kNeutralSkill};
+        int lockedPlayer = -1;       // Be a Pro: the only Home player the human controls (-1 = all of them)
+        float teammateSkill = -1.f;  // how the CPU plays around a locked player (-1 = same as cpuSkill)
     };
 
     explicit RallySim(const Config& config);
@@ -116,7 +118,7 @@ public:
     const MatchScore& score() const { return score_; }
     const PendingContact& pending() const { return pending_; }
     const BlockAttempt& block() const { return block_; }
-    bool humanBlocking() const { return block_.active && !block_.committed && isHumanTeam(block_.team); }
+    bool humanBlocking() const { return block_.active && !block_.committed && isHumanPlayer(block_.player); }
     float blockReach(Team team) const;  // metres either side of the blocker
     Team servingTeam() const { return serving_; }
     int controlled() const { return controlled_; }
@@ -128,7 +130,8 @@ public:
     bool hasLanding() const { return hasLanding_; }
     Vec3 landing() const { return landing_; }
 
-    bool humanServing() const { return phase_ == RallyPhase::PreServe && config_.humanHome && serving_ == Team::Home; }
+    bool humanServing() const { return phase_ == RallyPhase::PreServe && isHumanPlayer(serverIndex()); }
+    bool humanToPlay() const { return pending_.active && isHumanPlayer(pending_.player); }
     bool serveCharging() const { return charging_; }
     float serveGauge() const;  // 0..1, sweeps while charging
     float serveAim() const { return serveAim_; }
@@ -168,6 +171,9 @@ private:
     Vec3 basePosition(int player) const;
     Vec3 formationPosition(int player) const;
     bool isHumanTeam(Team team) const { return config_.humanHome && team == Team::Home; }
+    bool isHumanPlayer(int player) const {
+        return config_.humanHome && player >= 0 && (config_.lockedPlayer < 0 ? player < 6 : player == config_.lockedPlayer);
+    }
     float skillBoost(Team team, Skill skill) const;  // about -1..1; 0 for CPU teams
     std::optional<ContactQuality> gradePress(Team team, float error) const;
     void updateMomentum(Team winner, bool setWon);

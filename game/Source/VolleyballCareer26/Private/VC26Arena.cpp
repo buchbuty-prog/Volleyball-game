@@ -131,12 +131,15 @@ void AVC26Arena::StartMatch(bool bCareer)
 		Config.rules = vc26::Career::matchRules();
 		Config.cpuSkill = Career->opponentCpuSkill();
 		Config.humanSkills = Career->skills();
+		Config.lockedPlayer = Career->lockedPlayer();
+		Config.teammateSkill = Career->teammateSkill();
 		HomeName = UTF8_TO_TCHAR(Career->myTeam().name.c_str());
 		AwayName = UTF8_TO_TCHAR(Career->teams()[Career->nextOpponent()].name.c_str());
 	}
 
 	Sim = MakeUnique<vc26::RallySim>(Config);
 	Stats = {};
+	LockedPlayer = Config.lockedPlayer;
 	Highlights.Reset();
 	Snapshot.Reset();
 	InputLog.Reset();
@@ -202,6 +205,13 @@ TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 		}
 		Items.Add({TEXT("Back"), EVC26MenuAction::Back});
 		break;
+	case EVC26Screen::Story:
+		if (const vc26::StoryEvent* Story = Career.IsSet() ? Career->pendingStory() : nullptr)
+		{
+			Items.Add({UTF8_TO_TCHAR(Story->options[0]), EVC26MenuAction::StoryChoice, 0});
+			Items.Add({UTF8_TO_TCHAR(Story->options[1]), EVC26MenuAction::StoryChoice, 1});
+		}
+		break;
 	default:
 		break;
 	}
@@ -224,7 +234,7 @@ void AVC26Arena::ConfirmMenu()
 		GoTo(EVC26Screen::Hub);
 		return;
 	case EVC26Screen::Report:
-		GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
+		GoTo(Career->pendingStory() ? EVC26Screen::Story : Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
 		return;
 	case EVC26Screen::SeasonEnd:
 		Career->startNextSeason();
@@ -246,7 +256,7 @@ void AVC26Arena::ConfirmMenu()
 	case EVC26MenuAction::ContinueCareer:
 		if (LoadCareer())
 		{
-			GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
+			GoTo(Career->pendingStory() ? EVC26Screen::Story : Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
 		}
 		break;
 	case EVC26MenuAction::NewCareer: GoTo(EVC26Screen::CreatePlayer); break;
@@ -262,6 +272,11 @@ void AVC26Arena::ConfirmMenu()
 		}
 		break;
 	case EVC26MenuAction::Back: GoTo(EVC26Screen::Hub); break;
+	case EVC26MenuAction::StoryChoice:
+		Career->chooseStory(Item.Arg);
+		SaveCareer();
+		GoTo(Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
+		break;
 	}
 }
 
@@ -662,7 +677,7 @@ void AVC26Arena::HandleEvents()
 	{
 		if (bLive)
 		{
-			vc26::recordEvent(Stats, Event);
+			vc26::recordEvent(Stats, Event, LockedPlayer);
 		}
 
 		switch (Event.type)
@@ -719,14 +734,14 @@ void AVC26Arena::HandleEvents()
 			{
 				SetBanner(Event.quality == vc26::ContactQuality::Perfect ? TEXT("ROOF BLOCK!") : TEXT("BLOCK TOUCH"));
 			}
-			else if (Event.team == vc26::Team::Home && Event.kind != vc26::ContactKind::Serve && Sim->humanHome())
+			else if (Event.team == vc26::Team::Home && Event.kind != vc26::ContactKind::Serve && Sim->humanHome() && (LockedPlayer < 0 || Event.player == LockedPlayer))
 			{
 				SetBanner(QualityText(Event.quality));
 			}
 			break;
 		}
 		case vc26::SimEvent::Type::Whiff:
-			if (Event.team == vc26::Team::Home && Sim->humanHome())
+			if (Event.team == vc26::Team::Home && Sim->humanHome() && (LockedPlayer < 0 || Event.player == LockedPlayer))
 			{
 				SetBanner(TEXT("TOO FAR AWAY"));
 			}

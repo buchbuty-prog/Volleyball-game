@@ -10,6 +10,24 @@ namespace vc26 {
 namespace {
 
 constexpr int kPromotionInterest = 100;
+constexpr int kRivalTeam = 1;  // the rival plays for this club at every level below the World Stage
+constexpr int kRivalEdge = 8;
+constexpr float kInjuryChance = 0.08f;
+
+enum StoryId { PressCredit, CoachFilm, RivalBeaten, RivalLost, SoreAnkle };
+
+const StoryEvent kStories[] = {
+    {"Press Conference", "A reporter asks who deserves the credit for your form.",
+     {"\"My teammates make it easy.\"", "\"I've been carrying this team.\""}, {3, -3}, {10, -8}, {0, 10}, {0, 0}},
+    {"Film Session", "Coach wants you in early tomorrow to study film. It's your only day off.",
+     {"Be there first.", "Skip it and train alone."}, {10, -8}, {2, 0}, {0, 0}, {0, 2}},
+    {"Rivalry", "You beat Niko Vance's team. Niko tells the cameras you got lucky.",
+     {"Let the game do the talking.", "Fire back in the interview."}, {5, -5}, {5, 0}, {0, 8}, {0, 0}},
+    {"Rivalry", "Niko Vance's team beat you. Your phone buzzes: \"Better luck next time.\"",
+     {"Screenshot it and train harder.", "Shrug it off."}, {0, 5}, {0, 3}, {0, 0}, {2, 0}},
+    {"Sore Ankle", "You rolled your ankle late on. The physio wants you to rest it.",
+     {"Listen to the physio.", "Tape it and tell no one."}, {8, -4}, {0, 4}, {0, 8}, {0, 0}},
+};
 
 const char* const kRivals[3][7] = {
     {"Riverside Tech", "North Valley U", "Lakeshore College", "Summit State", "Harbor Institute", "Pinecrest U", "Eastfield College"},
@@ -25,7 +43,7 @@ struct Specialty {
     Skill second;
 };
 constexpr Specialty kSpecialties[kArchetypes] = {
-    {Skill::Attack, Skill::Serve},
+    {Skill::Attack, Skill::Serve},  // order matches Archetype
     {Skill::Pass, Skill::Block},
     {Skill::Set, Skill::Pass},
     {Skill::Block, Skill::Attack},
@@ -63,16 +81,17 @@ const char* toString(Tier t) {
     return "";
 }
 
-void recordEvent(MatchStats& stats, const SimEvent& e) {
+void recordEvent(MatchStats& stats, const SimEvent& e, int lockedPlayer) {
+    const bool mine = lockedPlayer < 0 || e.player == lockedPlayer;
     switch (e.type) {
         case SimEvent::Type::Contact:
-            if (e.team != Team::Home || e.kind == ContactKind::Serve) break;
+            if (e.team != Team::Home || e.kind == ContactKind::Serve || !mine) break;
             if (e.quality == ContactQuality::Perfect) ++stats.perfect;
             if (e.quality == ContactQuality::Good) ++stats.good;
             if (e.quality == ContactQuality::Shank) ++stats.shanks;
             break;
         case SimEvent::Type::Whiff:
-            if (e.team == Team::Home) ++stats.whiffs;
+            if (e.team == Team::Home && mine) ++stats.whiffs;
             break;
         case SimEvent::Type::NetHit:
         case SimEvent::Type::ZoneStart:
@@ -80,14 +99,14 @@ void recordEvent(MatchStats& stats, const SimEvent& e) {
         case SimEvent::Type::Point:
             if (e.team == Team::Home) {
                 ++stats.pointsWon;
-                if (e.reason == PointReason::Kill) ++stats.kills;
-                if (e.reason == PointReason::Ace) ++stats.aces;
-                if (e.reason == PointReason::Block) ++stats.blocks;
+                if (mine && e.reason == PointReason::Kill) ++stats.kills;
+                if (mine && e.reason == PointReason::Ace) ++stats.aces;
+                if (mine && e.reason == PointReason::Block) ++stats.blocks;
                 if (e.clutch) ++stats.clutchPoints;
             } else {
                 ++stats.pointsLost;
-                if (e.reason == PointReason::Out || e.reason == PointReason::Antenna || e.reason == PointReason::NetTouch ||
-                    e.reason == PointReason::BallDown) {
+                if (mine && (e.reason == PointReason::Out || e.reason == PointReason::Antenna || e.reason == PointReason::NetTouch ||
+                             e.reason == PointReason::BallDown)) {
                     ++stats.errors;
                 }
             }
@@ -128,6 +147,38 @@ SkillRatings Career::startingSkills(Archetype archetype) {
     return skills;
 }
 
+const char* Career::rivalName() { return "Niko Vance"; }
+
+bool Career::isRivalMatch() const { return tier_ != Tier::WorldStage && stage_ != CareerStage::SeasonOver && nextOpponent() == kRivalTeam; }
+
+const StoryEvent* Career::pendingStory() const { return story_ >= 0 ? &kStories[story_] : nullptr; }
+
+void Career::chooseStory(int option) {
+    const StoryEvent* story = pendingStory();
+    if (!story || option < 0 || option > 1) return;
+    trust_ = std::clamp(trust_ + story->trust[option], 0, 100);
+    chemistry_ = std::clamp(chemistry_ + story->chemistry[option], 0, 100);
+    scout_ = std::clamp(scout_ + story->scout[option], 0, kPromotionInterest);
+    skillPoints_ += story->skillPoints[option];
+    story_ = -1;
+}
+
+// Each archetype's position. None is a middle, because the libero swaps with those.
+int Career::lockedPlayer() const {
+    switch (archetype_) {
+        case Archetype::PowerSpiker: return 1;      // outside hitter
+        case Archetype::DefensiveAnchor: return 4;  // outside hitter, passing first
+        case Archetype::PrecisionSetter: return 0;  // setter
+        case Archetype::BlockSpecialist: return 3;  // opposite
+    }
+    return 1;
+}
+
+float Career::teammateSkill() const {
+    const float level = 0.45f + 0.2f * static_cast<float>(tier_);
+    return std::clamp(level + static_cast<float>(chemistry_ - 50) / 250.f + static_cast<float>(trust_ - 50) / 400.f, 0.25f, 1.f);
+}
+
 int Career::overall() const {
     return (std::accumulate(skills_.begin(), skills_.end(), 0) + kSkills / 2) / kSkills;
 }
@@ -142,6 +193,7 @@ void Career::buildLeague() {
         teams_[i].name = kRivals[t][i - 1];
         teams_[i].strength = kStrengthFloor[t] + static_cast<int>(rand01() * 25.f);
     }
+    if (tier_ != Tier::WorldStage) teams_[kRivalTeam].strength += kRivalEdge;
     round_ = 0;
     stage_ = CareerStage::League;
     wonFinal_ = false;
@@ -232,6 +284,10 @@ MatchReport Career::recordMatch(int setsFor, int setsAgainst, const MatchStats& 
     ++matches_;
     ratingTotal_ += report.rating;
 
+    const bool rivalMatch = isRivalMatch();
+    if (rivalMatch) ++(report.won ? rivalWins_ : rivalLosses_);
+    trust_ = std::clamp(trust_ + static_cast<int>(std::lround((report.rating - 6.5f) * 2.f)), 0, 100);
+
     if (stage_ == CareerStage::Final) {
         wonFinal_ = report.won;
         finishSeason();
@@ -245,6 +301,16 @@ MatchReport Career::recordMatch(int setsFor, int setsAgainst, const MatchStats& 
         if (team != rival && team < against) simulateMatch(team, against);
     }
     ++round_;
+
+    if (rivalMatch) {
+        story_ = report.won ? RivalBeaten : RivalLost;
+    } else if (rand01() < kInjuryChance) {
+        story_ = SoreAnkle;
+    } else if (round_ == 2) {
+        story_ = PressCredit;
+    } else if (round_ == 5) {
+        story_ = CoachFilm;
+    }
 
     if (round_ == kRounds) {
         if (leaguePosition() <= 2) {
@@ -285,10 +351,11 @@ bool Career::upgrade(Skill s) {
 std::string Career::save() const {
     std::ostringstream out;
     out.precision(9);  // enough to bring a float back exactly
-    out << "vc26career 1\n" << name_ << '\n';
+    out << "vc26career 2\n" << name_ << '\n';
     out << static_cast<int>(archetype_) << ' ' << rng_ << ' ' << skillPoints_ << ' ' << static_cast<int>(tier_) << ' ' << season_ << ' '
         << round_ << ' ' << static_cast<int>(stage_) << ' ' << scout_ << ' ' << trophies_ << ' ' << matches_ << ' ' << ratingTotal_ << ' '
         << wonFinal_ << ' ' << promoted_ << '\n';
+    out << trust_ << ' ' << chemistry_ << ' ' << rivalWins_ << ' ' << rivalLosses_ << ' ' << story_ << '\n';
     for (int s : skills_) out << s << ' ';
     out << '\n';
     for (const LeagueTeam& t : teams_) {
@@ -302,7 +369,8 @@ std::optional<Career> Career::load(const std::string& text) {
     std::istringstream in(text);
     std::string header;
     std::getline(in, header);
-    if (header != "vc26career 1") return std::nullopt;
+    const bool version2 = header == "vc26career 2";
+    if (!version2 && header != "vc26career 1") return std::nullopt;
 
     std::string name;
     std::getline(in, name);
@@ -310,6 +378,7 @@ std::optional<Career> Career::load(const std::string& text) {
     Career c(name, Archetype::PowerSpiker, 1);
     in >> archetype >> c.rng_ >> c.skillPoints_ >> tier >> c.season_ >> c.round_ >> stage >> c.scout_ >> c.trophies_ >> c.matches_ >>
         c.ratingTotal_ >> c.wonFinal_ >> c.promoted_;
+    if (version2) in >> c.trust_ >> c.chemistry_ >> c.rivalWins_ >> c.rivalLosses_ >> c.story_;
     for (int& s : c.skills_) in >> s;
     for (LeagueTeam& t : c.teams_) {
         in >> std::ws;
@@ -319,7 +388,8 @@ std::optional<Career> Career::load(const std::string& text) {
     if (in.fail() || archetype < 0 || archetype >= kArchetypes || tier < 0 || tier > 2 || stage < 0 || stage > 2) return std::nullopt;
     const bool skillsOk = std::all_of(c.skills_.begin(), c.skills_.end(), [](int s) { return s >= kMinSkill && s <= kMaxSkill; });
     if (!skillsOk || c.rng_ == 0 || c.round_ < 0 || c.round_ > kRounds || c.season_ < 1 || c.scout_ < 0 || c.scout_ > kPromotionInterest ||
-        c.skillPoints_ < 0 || c.trophies_ < 0 || c.matches_ < 0) {
+        c.skillPoints_ < 0 || c.trophies_ < 0 || c.matches_ < 0 || c.trust_ < 0 || c.trust_ > 100 || c.chemistry_ < 0 ||
+        c.chemistry_ > 100 || c.story_ < -1 || c.story_ > SoreAnkle) {
         return std::nullopt;
     }
     c.archetype_ = static_cast<Archetype>(archetype);

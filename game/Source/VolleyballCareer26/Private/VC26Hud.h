@@ -38,4 +38,5 @@ private:
 	void DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career);
 	void DrawReport(const AVC26Arena& Arena, const vc26::Career& Career);
 	void DrawSeasonEnd(const vc26::Career& Career);
+	void DrawStory(const AVC26Arena& Arena, const vc26::Career& Career);
 };
