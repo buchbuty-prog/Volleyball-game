@@ -819,8 +819,11 @@ void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 	FVector Moved = Feet - Figure.LastFeet;
 	Moved.Z = 0.f;
 	Figure.LastFeet = Feet;
-	const float Speed = DeltaSeconds > 0.f ? Moved.Size() / DeltaSeconds : 0.f;
-	const FVector MoveDir = Moved.GetSafeNormal();
+	// From the sim, as frames in slow motion can land between its steps.
+	FVector Velocity = SimToWorld(Sim->players()[Player].vel);
+	Velocity.Z = 0.f;
+	const float Speed = Velocity.Size();
+	const FVector MoveDir = Velocity.GetSafeNormal();
 	Figure.StridePhase += Moved.Size() * 0.035f;
 	Figure.RunAmount = FMath::FInterpTo(Figure.RunAmount, FMath::Clamp(Speed / 500.f, 0.f, 1.f), DeltaSeconds, 12.f);
 	Figure.SwingLeft = FMath::Max(Figure.SwingLeft - DeltaSeconds, 0.f);

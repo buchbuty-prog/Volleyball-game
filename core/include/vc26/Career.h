@@ -178,6 +178,7 @@ public:
 private:
     void buildLeague();
     int opponentInRound(int round, int team) const;
+    void playSets(int strengthA, int strengthB, int& setsA, int& setsB);
     void simulateMatch(int a, int b);
     void finishRound(int opponent, int setsFor, int setsAgainst);
     void applyResult(int a, int b, int setsA, int setsB);

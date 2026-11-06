@@ -183,8 +183,11 @@ void Career::chooseStory(int option) {
     chemistry_ = std::clamp(chemistry_ + story->chemistry[option], 0, 100);
     scout_ = std::clamp(scout_ + story->scout[option], 0, kPromotionInterest);
     skillPoints_ += story->skillPoints[option];
-    injured_ += story->rest[option];
-    if (story_ == SoreAnkle && option == 1 && rand01() < kTapedAnkleRisk) injured_ += kTapedAnkleMatches;
+    // Rest only means something with league matches left to miss.
+    if (stage_ == CareerStage::League) {
+        injured_ += story->rest[option];
+        if (story_ == SoreAnkle && option == 1 && rand01() < kTapedAnkleRisk) injured_ += kTapedAnkleMatches;
+    }
     story_ = -1;
 }
 
@@ -203,7 +206,8 @@ int Career::lockedPlayer() const {
 
 float Career::teammateSkill() const {
     const float level = 0.45f + 0.2f * static_cast<float>(tier_);
-    return std::clamp(level + static_cast<float>(chemistry_ - 50) / 250.f + static_cast<float>(trust_ - 50) / 400.f, 0.25f, 1.f);
+    const float squad = static_cast<float>(clubEdge_) / 100.f;  // a stronger club plays better around you
+    return std::clamp(level + squad + static_cast<float>(chemistry_ - 50) / 250.f + static_cast<float>(trust_ - 50) / 400.f, 0.25f, 1.f);
 }
 
 int Career::overall() const {
@@ -289,11 +293,15 @@ void Career::applyResult(int a, int b, int setsA, int setsB) {
     ++(setsA > setsB ? y.lost : x.lost);
 }
 
+void Career::playSets(int strengthA, int strengthB, int& setsA, int& setsB) {
+    const float aWins = 1.f / (1.f + std::exp(static_cast<float>(strengthB - strengthA) / 10.f));
+    while (setsA < 2 && setsB < 2) ++(rand01() < aWins ? setsA : setsB);
+}
+
 void Career::simulateMatch(int a, int b) {
-    const float aWins = 1.f / (1.f + std::exp(static_cast<float>(teams_[b].strength - teams_[a].strength) / 10.f));
     int setsA = 0;
     int setsB = 0;
-    while (setsA < 2 && setsB < 2) ++(rand01() < aWins ? setsA : setsB);
+    playSets(teams_[a].strength, teams_[b].strength, setsA, setsB);
     applyResult(a, b, setsA, setsB);
 }
 
@@ -376,9 +384,7 @@ MatchReport Career::sitOut() {
     skillPoints_ += report.skillPoints;
 
     const int opponent = nextOpponent();
-    const int edge = teams_[0].strength - kSitOutPenalty - teams_[opponent].strength;
-    const float homeWins = 1.f / (1.f + std::exp(-static_cast<float>(edge) / 10.f));
-    while (report.setsFor < 2 && report.setsAgainst < 2) ++(rand01() < homeWins ? report.setsFor : report.setsAgainst);
+    playSets(teams_[0].strength - kSitOutPenalty, teams_[opponent].strength, report.setsFor, report.setsAgainst);
     report.won = report.setsFor > report.setsAgainst;
 
     if (benched()) trust_ = std::min(100, trust_ + kBenchedTrustGain);
@@ -421,7 +427,7 @@ void Career::finishSeason() {
         std::swap(clubs[static_cast<std::size_t>(i)], clubs[static_cast<std::size_t>(i) + static_cast<std::size_t>(rand01() * 5.99f) % (clubs.size() - static_cast<std::size_t>(i))]);
         TransferOffer offer;
         offer.club = kRivals[next][clubs[static_cast<std::size_t>(i)]];
-        offer.strength = 3 + static_cast<int>(rand01() * 10.f);
+        offer.strength = 5 + static_cast<int>(rand01() * 8.f);
         offer.signingPoints = 2 + static_cast<int>(rand01() * 5.f);
         if (offer.club != club_) offers_.push_back(offer);
     }
@@ -450,6 +456,7 @@ void Career::startNextSeason(int offer) {
     }
     if (stayedLoyal) chemistry_ = std::min(100, chemistry_ + kLoyaltyChemistry);
     offers_.clear();
+    injured_ = 0;  // the summer heals everything
     ++season_;
     scout_ = 0;
     seasonRatingTotal_ = 0.f;

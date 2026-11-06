@@ -1428,6 +1428,37 @@ TEST(transfers_and_history_survive_a_save) {
     CHECK(again->save() == moved.save());
 }
 
+TEST(a_stronger_club_really_plays_better_around_you) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    while (c.stage() != CareerStage::SeasonOver) {
+        c.recordMatch(2, 0, strongGame());
+        if (c.pendingStory()) c.chooseStory(0);
+    }
+    REQUIRE(!c.offers().empty());
+    const int edge = c.offers()[0].strength;
+    Career stayed = c, signed_ = c;
+    stayed.startNextSeason();
+    signed_.startNextSeason(0);
+    const float mood = static_cast<float>(signed_.chemistry() - stayed.chemistry()) / 250.f + static_cast<float>(signed_.coachTrust() - stayed.coachTrust()) / 400.f;
+    CHECK(std::fabs(signed_.teammateSkill() - stayed.teammateSkill() - mood - static_cast<float>(edge) / 100.f) < 0.001f);
+}
+
+TEST(rest_never_spills_into_the_final_or_the_next_season) {
+    for (std::uint32_t seed = 1; seed < 40; ++seed) {
+        Career c("A", Archetype::PowerSpiker, seed);
+        while (c.stage() == CareerStage::League) {
+            c.recordMatch(2, 0, MatchStats{});
+            const bool ended = c.stage() != CareerStage::League;
+            if (c.pendingStory()) c.chooseStory(1);
+            if (ended) CHECK(c.injuredMatches() == 0 || c.stage() == CareerStage::League);
+            if (!c.canPlay() && c.stage() == CareerStage::League) c.sitOut();
+        }
+        if (c.stage() == CareerStage::Final) c.recordMatch(2, 0, strongGame());
+        c.startNextSeason();
+        CHECK(c.injuredMatches() == 0);
+    }
+}
+
 // --- Broadcast --------------------------------------------------------------
 
 TEST(a_team_keeps_its_names_and_no_name_repeats) {

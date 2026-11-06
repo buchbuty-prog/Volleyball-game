@@ -223,7 +223,7 @@ void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
 	if (!Career.canPlay())
 	{
 		const FString Status = Career.injuredMatches() > 0
-			? FString::Printf(TEXT("INJURED: out for %d more %s"), Career.injuredMatches(), Career.injuredMatches() == 1 ? TEXT("match") : TEXT("matches"))
+			? FString::Printf(TEXT("OUT for %d more %s"), Career.injuredMatches(), Career.injuredMatches() == 1 ? TEXT("match") : TEXT("matches"))
 			: FString(TEXT("BENCHED: the coach has lost trust in you"));
 		Label(Status, 84.f, 350.f, FLinearColor(0.95f, 0.4f, 0.35f), 1.05f);
 	}

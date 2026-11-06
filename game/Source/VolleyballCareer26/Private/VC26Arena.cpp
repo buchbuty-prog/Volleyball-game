@@ -124,7 +124,7 @@ void AVC26Arena::StartBackgroundMatch()
 void AVC26Arena::SetRosters()
 {
 	HomeRoster = vc26::makeRoster(TCHAR_TO_UTF8(*HomeName));
-	AwayRoster = vc26::makeRoster(TCHAR_TO_UTF8(*(AwayName + TEXT(" away"))));
+	AwayRoster = vc26::makeRoster(TCHAR_TO_UTF8(*AwayName));
 	if (bCareerMatch && Career.IsSet())
 	{
 		HomeRoster[Sim->players()[Career->lockedPlayer()].id - 1] = Career->name();
@@ -217,6 +217,14 @@ void AVC26Arena::StartMatch(bool bCareer, EVC26Mode Mode)
 
 void AVC26Arena::FinishMatch()
 {
+	if (bCouch)
+	{
+		// Two people played, so one side's report would tell the winner they lost.
+		GoTo(EVC26Screen::MainMenu);
+		StartBackgroundMatch();
+		return;
+	}
+
 	const vc26::MatchScore& Score = Sim->score();
 	const int32 SetsFor = Score.sets(vc26::Team::Home);
 	const int32 SetsAgainst = Score.sets(vc26::Team::Away);
@@ -272,7 +280,7 @@ TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 	case EVC26Screen::Hub:
 		if (Career.IsSet() && !Career->canPlay())
 		{
-			Items.Add({Career->injuredMatches() > 0 ? TEXT("Watch From The Stands (Injured)") : TEXT("Watch From The Bench"), EVC26MenuAction::SitOut});
+			Items.Add({Career->injuredMatches() > 0 ? TEXT("Watch From The Stands") : TEXT("Watch From The Bench"), EVC26MenuAction::SitOut});
 		}
 		else
 		{
@@ -624,6 +632,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	{
 		UpdateReplay(DeltaSeconds);
 		HandleEvents();
+		CommentaryTimeLeft = 0.f;  // the call belongs to the live point
 		AnimationRate = ReplaySpeed;
 		SyncShapes(DeltaSeconds);
 		UpdateCamera(DeltaSeconds);
@@ -723,6 +732,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 void AVC26Arena::BeginClip(const FClip& Clip)
 {
 	Sim = MakeUnique<vc26::RallySim>(*Clip.Start);
+	ApplyVenue(Sim->beach());  // the match behind a report may be indoors
 	ReplayInputs = Clip.Inputs;
 	ReplayCursor = 0;
 	Accumulator = 0.f;
@@ -744,6 +754,7 @@ void AVC26Arena::PlayNextClip()
 void AVC26Arena::EndReplay()
 {
 	Sim = MoveTemp(ParkedSim);
+	ApplyVenue(Sim->beach());
 	ReplayQueue.Reset();
 	Screen = ReplayReturn;
 	Accumulator = 0.f;
@@ -887,7 +898,10 @@ void AVC26Arena::HandleEvents()
 				break;
 			}
 			bTakeSnapshot = bTakeSnapshot || Event.kind == vc26::ContactKind::Serve || Event.kind == vc26::ContactKind::Set;
-			LastTouch[static_cast<int32>(Event.team)] = Event.player;
+			if (bLive)
+			{
+				LastTouch[static_cast<int32>(Event.team)] = Event.player;
+			}
 			FFigure& Figure = Figures[Event.player];
 			Figure.Swing = Swing;
 			Figure.SwingLeft = 0.28f;

@@ -66,7 +66,8 @@ std::string callPoint(const PointCall& call, std::uint32_t pick) {
     static const char* const kAce[] = {"Ace! {scorer} leaves them standing.", "{scorer} from the service line. Unplayable.", "Straight to the floor. Ace for {scorer}."};
     static const char* const kBlock[] = {"Stuffed by {scorer}!", "{scorer} shuts the door at the net.", "Roof! {scorer} says no."};
     static const char* const kDown[] = {"It drops. Nobody calls it.", "The floor wins that one.", "Point {team}. That one fell between them."};
-    static const char* const kOut[] = {"Long! {blunder} gives that one away.", "That's out. A gift for {team}.", "{blunder} can't keep it in."};
+    static const char* const kOut[] = {"Out! {blunder} gives that one away.", "That's out. A gift for {team}.", "{blunder} can't keep it in."};
+    static const char* const kAntenna[] = {"Off the antenna! {blunder} can't believe it.", "That clips the antenna. Point {team}."};
     static const char* const kNet[] = {"Net touch, and the point goes to {team}.", "{blunder} clips the net."};
 
     std::string line;
@@ -75,8 +76,8 @@ std::string callPoint(const PointCall& call, std::uint32_t pick) {
         case PointReason::Ace: line = pickOne(kAce, pick); break;
         case PointReason::Block: line = pickOne(kBlock, pick); break;
         case PointReason::BallDown: line = pickOne(kDown, pick); break;
-        case PointReason::Out:
-        case PointReason::Antenna: line = pickOne(kOut, pick); break;
+        case PointReason::Out: line = pickOne(kOut, pick); break;
+        case PointReason::Antenna: line = pickOne(kAntenna, pick); break;
         case PointReason::NetTouch: line = pickOne(kNet, pick); break;
     }
     // Without a name the line would read wrong, so it falls back to the team.
