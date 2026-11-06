@@ -7,6 +7,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "Templates/UniquePtr.h"
+#include "VC26AthleteAnim.h"
 #include "VC26Sounds.h"
 #include "vc26/Career.h"
 #include "vc26/RallySim.h"
@@ -105,8 +106,9 @@ public:
 private:
 	enum class EPose : uint8 { Idle, Pass, Set, AttackWindUp, AttackSwing, Block, ServeToss, Dive, Celebrate };
 
-	// What a rigged athlete is playing. Several reuse one animation from a different start.
-	enum class EClip : uint8 { Idle, Run, Crouch, Set, Block, Spike, Serve, Dive, Celebrate, Count };
+	// What a rigged athlete is playing underneath. Spike starts early for a wind-up,
+	// Swing late for a hit with none. Passes, sets and blocks are built on Idle.
+	enum class EClip : uint8 { Idle, Run, Spike, Swing, Dive, Samba, Count };
 
 	// Per-player animation state. The shapes themselves live in Parts.
 	struct FFigure
@@ -121,6 +123,11 @@ private:
 		FVector DiveDirection = FVector::ForwardVector;
 		int32 ShownId = -1;
 		EClip Clip = EClip::Count;
+		float FadeLeft = 0.f;
+		float FadeTime = 0.f;
+		FVector Body = FVector::ForwardVector;  // the way the hips point
+		FVector Reach = FVector::ZeroVector;    // where the ball was last met
+		FVC26AthleteDrive Drive;
 		bool bShown = true;
 	};
 
@@ -172,7 +179,7 @@ private:
 	void BuildCrowd();
 	void BuildPlayers();
 	bool BuildAthletes();
-	void AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward);
+	void AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward, const FVector& MoveDir, float Speed, float DeltaSeconds);
 	void BuildBall();
 	void BuildLights();
 	void ApplyVenue(bool bBeach);
@@ -289,6 +296,12 @@ private:
 	float OrbitAngle = 0.f;
 	float ShakeLeft = 0.f;
 	float SlowMoLeft = 0.f;
+	float AnimationRate = 1.f;  // how fast the players move next to real time
+
+	// The screenshot tour can freeze the match and pose everyone.
+	int32 GalleryPose = -1;
+	int32 GalleryPlayer = 0;
+	FVector GalleryView = FVector(230.f, -230.f, 140.f);
 	float BallSpin = 0.f;
 	float CrowdExcitement = 0.f;
 	bool bCrowdSettled = true;

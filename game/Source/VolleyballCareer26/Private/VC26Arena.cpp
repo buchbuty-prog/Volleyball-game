@@ -95,6 +95,7 @@ void AVC26Arena::BeginPlay()
 	// -VC26ShotDir=<folder> walks through every screen, saves a picture of each
 	// and quits. It never touches the real save.
 	FParse::Value(FCommandLine::Get(), TEXT("VC26ShotDir="), ShotDir);
+	FParse::Value(FCommandLine::Get(), TEXT("VC26TourStart="), TourStep);
 	bHasSave = ShotDir.IsEmpty() && FPaths::FileExists(SavePath());
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("VC26Autoplay")))
@@ -502,6 +503,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	{
 		UpdateReplay(DeltaSeconds);
 		HandleEvents();
+		AnimationRate = ReplaySpeed;
 		SyncShapes(DeltaSeconds);
 		UpdateCamera(DeltaSeconds);
 		Sounds.Tick(DeltaSeconds);
@@ -568,7 +570,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 
 	// Fixed steps keep the timing windows and results independent of frame rate.
 	const float SimDelta = SlowMoLeft > 0.f ? DeltaSeconds * SlowMoScale : DeltaSeconds;
-	Accumulator = FMath::Min(Accumulator + SimDelta, 0.25f);
+	Accumulator = GalleryPose >= 0 ? 0.f : FMath::Min(Accumulator + SimDelta, 0.25f);
 	while (Accumulator >= SimStep)
 	{
 		Sim->step(SimStep, Input, AwayInput);
@@ -584,6 +586,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	{
 		return;  // a replay just took over
 	}
+	AnimationRate = SimDelta / FMath::Max(DeltaSeconds, UE_SMALL_NUMBER);
 	SyncShapes(DeltaSeconds);
 	UpdateCamera(DeltaSeconds);
 	Sounds.Tick(DeltaSeconds);
@@ -765,6 +768,7 @@ void AVC26Arena::HandleEvents()
 			FFigure& Figure = Figures[Event.player];
 			Figure.Swing = Swing;
 			Figure.SwingLeft = 0.28f;
+			Figure.Reach = SimToWorld(Event.where);
 			if (Event.stretched)
 			{
 				Figure.Swing = EPose::Dive;
@@ -919,7 +923,23 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 		}
 		StartMatch(false, EVC26Mode::Beach);
 		break;
-	case 20: Shot(TEXT("13_beach")); break;
+	case 20: Shot(TEXT("13_beach")); StartBackgroundMatch(); GoTo(EVC26Screen::Match); break;
+	case 21: case 22: case 23: case 24: case 25: case 26: case 27: case 28: case 29:
+	{
+		// Everyone holds a pose for a close look, with the sim frozen.
+		static const TCHAR* const Names[] = {TEXT("20_ready"), TEXT("21_pass"), TEXT("22_set"), TEXT("23_block"), TEXT("24_windup"), TEXT("25_swing"), TEXT("26_toss"), TEXT("27_cheer")};
+		static const EPose Poses[] = {EPose::Idle, EPose::Pass, EPose::Set, EPose::Block, EPose::AttackWindUp, EPose::AttackSwing, EPose::ServeToss, EPose::Celebrate};
+		const int32 Index = TourStep - 23;
+		if (Index >= 0)
+		{
+			Shot(Names[Index]);
+		}
+		if (Index + 1 < UE_ARRAY_COUNT(Poses))
+		{
+			GalleryPose = static_cast<int32>(Poses[Index + 1]);
+		}
+		break;
+	}
 	default: FPlatformMisc::RequestExit(false, TEXT("VC26 screenshot tour")); break;
 	}
 }
