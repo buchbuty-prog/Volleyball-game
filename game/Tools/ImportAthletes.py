@@ -148,12 +148,12 @@ result = lerp(result, BandColor, band);
 // Volleyball shoes: a coloured upper, a stripe, and a pale rubber sole.
 float3 shoe = ShoeBase * (0.55 + 0.7 * hi);
 shoe = lerp(shoe, ShoeAccent, z > 5.5 && z < 7.8 ? 1.0 : 0.0);
-shoe = lerp(shoe, float3(0.8, 0.8, 0.78), z < 3.2 ? 1.0 : 0.0);
+shoe = lerp(shoe, float3(0.8, 0.8, 0.78), z < 5.0 ? 1.0 : 0.0);
 return lerp(result, shoe, z < 13.0 ? 1.0 : 0.0);"""
 
 # Runs per vertex, so one mesh can be many people. Each bump swells or sinks the
 # skin along its normal around a landmark measured on the T-pose, in cm. Kit and
-# skin share the same bumps, so nothing pokes through. The studs flatten into the sole.
+# skin share the same bumps, so nothing pokes through.
 SHAPE_SHADER = """float ax = abs(P.x);
 float z = P.z;
 float3 s = float3(ax, P.y, z);
@@ -187,7 +187,10 @@ off += BodyB.x * torso * saturate((z - 90.0) / 6.0) * saturate((124.0 - z) / 8.0
 off += BodyB.y * saturate((z - 61.0) / 8.0) * saturate((96.0 - z) / 6.0) * step(ax, 24.0);
 off += BodyB.z * saturate((z - 12.0) / 6.0) * saturate((48.0 - z) / 6.0) * step(ax, 24.0);
 
-return N * off + float3(0.0, 0.0, max(1.25 - z, 0.0));"""
+// Studs reach 3.2 cm up. They fold into a flat sole, and the shoe above squeezes
+// down to meet it, so the foot still stands on the floor.
+float sole = lerp(0.6, 13.0, saturate((z - 3.2) / 9.8));
+return N * off + float3(0.0, 0.0, z < 13.0 ? sole - z : 0.0);"""
 
 # The hair is one haircut, so the others are cut from it. Lashes share the mesh.
 HAIR_SHADER = """float ax = abs(P.x);
