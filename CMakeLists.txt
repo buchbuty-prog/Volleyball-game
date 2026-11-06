@@ -14,6 +14,7 @@ add_library(vc26_core
     core/src/ServeFlight.cpp
     core/src/TouchControls.cpp
     core/src/Career.cpp
+    core/src/Appearance.cpp
     core/src/Commentary.cpp
 )
 target_include_directories(vc26_core PUBLIC core/include)

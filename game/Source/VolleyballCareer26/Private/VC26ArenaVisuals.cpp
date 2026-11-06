@@ -31,13 +31,6 @@ namespace
 	const FLinearColor HairColors[] = {
 		FLinearColor(0.02f, 0.015f, 0.01f), FLinearColor(0.12f, 0.06f, 0.02f), FLinearColor(0.4f, 0.25f, 0.08f)};
 
-	// Multiplied into the athlete texture's own skin, and added to its near-black hair.
-	const FLinearColor AthleteSkin[] = {
-		FLinearColor(1.f, 1.f, 1.f), FLinearColor(0.62f, 0.5f, 0.42f), FLinearColor(0.3f, 0.2f, 0.16f),
-		FLinearColor(1.1f, 1.02f, 0.96f), FLinearColor(0.82f, 0.72f, 0.6f), FLinearColor(0.45f, 0.33f, 0.27f)};
-	const FLinearColor AthleteHair[] = {
-		FLinearColor(0.f, 0.f, 0.f), FLinearColor(0.1f, 0.05f, 0.02f), FLinearColor(0.3f, 0.17f, 0.06f),
-		FLinearColor(0.02f, 0.01f, 0.01f), FLinearColor(0.55f, 0.4f, 0.16f)};
 
 	enum EPart
 	{
@@ -49,8 +42,7 @@ namespace
 		PartCount
 	};
 
-	// The attack's hand peaks about 0.7 s into its clip, so a wind-up that starts
-	// 0.55 s before contact begins at 0.15 s. Fade is how long the clip takes to blend in.
+	// Fade is how long a clip takes to blend in.
 	struct FClipInfo
 	{
 		const TCHAR* Asset;
@@ -62,8 +54,7 @@ namespace
 	const FClipInfo ClipInfo[] = {
 		{TEXT("A_Idle"), 0.f, 1.f, true, 0.25f},
 		{TEXT("A_Run"), 0.f, 1.f, true, 0.18f},
-		{TEXT("A_Spike"), 0.15f, 1.f, false, 0.12f},
-		{TEXT("A_Spike"), 0.62f, 1.f, false, 0.06f},
+
 		{TEXT("A_Dive"), 0.f, 1.6f, false, 0.1f},
 		{TEXT("A_Celebrate"), 0.f, 1.2f, true, 0.4f},
 	};
@@ -72,6 +63,19 @@ namespace
 	constexpr float RunClipSpeed = 533.f;  // cm/s the run clip covers, so the feet match the floor
 	constexpr float SwingSeconds = 0.28f;  // how long a touch is held after contact
 	constexpr float LandSeconds = 0.3f;
+	constexpr float GalleryJump = 70.f;    // how high the close-ups hold a player in the air
+
+	// Multiplied into the athlete texture's own skin, palest to darkest.
+	const FLinearColor LookSkin[vc26::kSkinTones] = {
+		FLinearColor(1.12f, 1.04f, 0.98f), FLinearColor(1.f, 1.f, 1.f), FLinearColor(0.86f, 0.76f, 0.64f), FLinearColor(0.72f, 0.6f, 0.48f),
+		FLinearColor(0.58f, 0.45f, 0.37f), FLinearColor(0.44f, 0.33f, 0.27f), FLinearColor(0.32f, 0.22f, 0.18f), FLinearColor(0.22f, 0.15f, 0.12f)};
+	const FLinearColor LookHair[vc26::kHairColours] = {
+		FLinearColor(0.f, 0.f, 0.f), FLinearColor(0.05f, 0.025f, 0.012f), FLinearColor(0.16f, 0.085f, 0.03f), FLinearColor(0.3f, 0.09f, 0.03f),
+		FLinearColor(0.6f, 0.43f, 0.18f), FLinearColor(0.24f, 0.24f, 0.25f), FLinearColor(0.55f, 0.04f, 0.05f)};
+	const FLinearColor LookShoes[vc26::kShoes][2] = {
+		{FLinearColor(0.85f, 0.85f, 0.87f), FLinearColor(0.05f, 0.15f, 0.6f)}, {FLinearColor(0.03f, 0.03f, 0.035f), FLinearColor(0.85f, 0.85f, 0.87f)},
+		{FLinearColor(0.75f, 0.9f, 0.05f), FLinearColor(0.03f, 0.03f, 0.035f)}, {FLinearColor(0.7f, 0.05f, 0.06f), FLinearColor(0.9f, 0.9f, 0.9f)},
+		{FLinearColor(0.04f, 0.14f, 0.65f), FLinearColor(0.9f, 0.75f, 0.1f)}, {FLinearColor(0.95f, 0.35f, 0.06f), FLinearColor(0.75f, 0.05f, 0.4f)}};
 
 	// Where the joint sits between two ends of a limb with equal halves.
 	FVector JointBetween(const FVector& Start, FVector& End, float HalfLength, const FVector& BendTowards)
@@ -467,19 +471,16 @@ bool AVC26Arena::BuildAthletes()
 		Athlete->RegisterComponent();
 		Athlete->SetAnimInstanceClass(UVC26AthleteAnim::StaticClass());
 		Athlete->SetWorldScale3D(FVector(Figures[i].Height));
-		// One body, twelve people: their own skin, hair, shorts and number.
+		// One body, twelve people. ApplyLook makes each one who they are.
 		UMaterialInstanceDynamic* Shirt = UMaterialInstanceDynamic::Create(Kit, this);
 		Shirt->SetVectorParameterValue(TEXT("Team"), i < 6 ? HomeJersey : AwayJersey);
 		Shirt->SetVectorParameterValue(TEXT("Shorts"), i < 6 ? HomeShorts : AwayShorts);
 		Shirt->SetVectorParameterValue(TEXT("Print"), i < 6 ? HomeShorts : FLinearColor::White);
-		Shirt->SetVectorParameterValue(TEXT("Skin"), AthleteSkin[(i * 5 + i / 6) % UE_ARRAY_COUNT(AthleteSkin)]);
 		Shirt->SetScalarParameterValue(TEXT("Number"), i % 6 + 1);
 		Athlete->SetMaterial(0, Shirt);
 		if (Hair)
 		{
-			UMaterialInstanceDynamic* Head = UMaterialInstanceDynamic::Create(Hair, this);
-			Head->SetVectorParameterValue(TEXT("Hair"), AthleteHair[(i * 7 + i / 6) % UE_ARRAY_COUNT(AthleteHair)]);
-			Athlete->SetMaterial(1, Head);
+			Athlete->SetMaterial(1, UMaterialInstanceDynamic::Create(Hair, this));
 		}
 		Athletes.Add(Athlete);
 
@@ -507,7 +508,10 @@ bool AVC26Arena::BuildAthletes()
 	Kit0->SetVectorParameterValue(TEXT("Team"), Black);
 	Kit0->SetVectorParameterValue(TEXT("Shorts"), Black);
 	Kit0->SetVectorParameterValue(TEXT("Print"), Black);
-	Kit0->SetVectorParameterValue(TEXT("Skin"), AthleteSkin[1]);
+	Kit0->SetVectorParameterValue(TEXT("Skin"), LookSkin[3]);
+	Kit0->SetVectorParameterValue(TEXT("Hair"), Black);
+	Kit0->SetVectorParameterValue(TEXT("ShoeBase"), Black);
+	Kit0->SetVectorParameterValue(TEXT("ShoeAccent"), Black);
 	Referee->SetMaterial(0, Kit0);
 	RefereeDrive.Clip = ClipAnims[static_cast<int32>(EClip::Idle)];
 	for (UStaticMeshComponent* Shape : RefereeShapes)
@@ -515,6 +519,55 @@ bool AVC26Arena::BuildAthletes()
 		Shape->SetVisibility(false);
 	}
 	return true;
+}
+
+void AVC26Arena::ApplyLook(int32 Player, const vc26::Appearance& Look)
+{
+	if (Athletes.IsEmpty())
+	{
+		return;
+	}
+	FFigure& Figure = Figures[Player];
+	const vc26::BodyShape Shape = vc26::bodyShape(Look);
+	Figure.Height = Shape.scale;
+	Athletes[Player]->SetWorldScale3D(FVector(Shape.scale));
+	Figure.Drive.LegScale = Shape.legs;
+	Figure.Drive.ArmScale = Shape.arms;
+	Figure.Drive.ShoulderWidth = Shape.shoulderWidth;
+	Figure.Drive.HeadScale = Shape.head;
+
+	const FLinearColor Team = Player < 6 ? HomeJersey : AwayJersey;
+	const FLinearColor Black(0.02f, 0.02f, 0.025f);
+	const FLinearColor White(0.85f, 0.85f, 0.87f);
+	const FLinearColor Trim[] = {Black, Black, White, Team};
+	const FLinearColor HairColor = LookHair[Look.hairColour];
+	auto Face = [&Look](vc26::FaceShape Part) { return Look.face[static_cast<int32>(Part)] / static_cast<float>(vc26::kFaceRange); };
+	const float HairStyle = static_cast<float>(static_cast<int32>(Look.hair));
+	const float Band = Look.headband > 0 ? 1.f : 0.f;
+
+	if (UMaterialInstanceDynamic* Body = Cast<UMaterialInstanceDynamic>(Athletes[Player]->GetMaterial(0)))
+	{
+		Body->SetVectorParameterValue(TEXT("Skin"), LookSkin[Look.skin]);
+		Body->SetVectorParameterValue(TEXT("Hair"), HairColor);
+		Body->SetVectorParameterValue(TEXT("ShoeBase"), LookShoes[Look.shoes][0]);
+		Body->SetVectorParameterValue(TEXT("ShoeAccent"), LookShoes[Look.shoes][1]);
+		Body->SetVectorParameterValue(TEXT("Knee"), Trim[Look.kneeSleeve]);
+		Body->SetVectorParameterValue(TEXT("BandColor"), Trim[Look.headband]);
+		Body->SetVectorParameterValue(TEXT("FaceA"), FLinearColor(Face(vc26::FaceShape::Nose), Face(vc26::FaceShape::Jaw), Face(vc26::FaceShape::Chin)));
+		Body->SetVectorParameterValue(TEXT("FaceB"), FLinearColor(Face(vc26::FaceShape::Cheeks), Face(vc26::FaceShape::Brow), Face(vc26::FaceShape::Forehead)));
+		Body->SetVectorParameterValue(TEXT("FaceC"), FLinearColor(Face(vc26::FaceShape::Lips), 0.f, 0.f));
+		Body->SetVectorParameterValue(TEXT("BodyA"), FLinearColor(Shape.shoulders, Shape.upperArms, Shape.chest));
+		Body->SetVectorParameterValue(TEXT("BodyB"), FLinearColor(Shape.waist, Shape.thighs, Shape.calves));
+		Body->SetVectorParameterValue(TEXT("KitA"), FLinearColor(static_cast<float>(Look.facialHair), HairStyle, static_cast<float>(Look.armSleeve)));
+		Body->SetVectorParameterValue(TEXT("KitB"), FLinearColor(static_cast<float>(Look.tattoo), Look.highSocks ? 1.f : 0.f, Look.kneeSleeve > 0 ? 1.f : 0.f));
+		Body->SetVectorParameterValue(TEXT("KitC"), FLinearColor(Band, Look.fingerTape ? 1.f : 0.f, 0.f));
+	}
+	if (UMaterialInstanceDynamic* Head = Cast<UMaterialInstanceDynamic>(Athletes[Player]->GetMaterial(1)))
+	{
+		Head->SetVectorParameterValue(TEXT("Hair"), HairColor);
+		Head->SetVectorParameterValue(TEXT("BandColor"), Trim[Look.headband]);
+		Head->SetVectorParameterValue(TEXT("HairStyle"), FLinearColor(HairStyle, Band, 0.f, 0.f));
+	}
 }
 
 void AVC26Arena::AnimateReferee(float DeltaSeconds)
@@ -550,16 +603,18 @@ void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, c
 
 	EClip Want = Running > 0.25f ? EClip::Run : EClip::Idle;
 	FVC26AthleteDrive Goal;
-	Goal.LookWeight = 0.9f;
+	Goal.LookWeight = Screen == EVC26Screen::Look ? 0.f : 0.9f;
+	// 0 at contact and 1 once the touch is over.
+	const float Release = Figure.SwingLeft > 0.f ? 1.f - FMath::Min(Figure.SwingLeft / SwingSeconds, 1.f) : 0.f;
 	switch (Pose)
 	{
 	case EPose::Idle:
-		if (bLost)
+		if (bLost && Screen != EVC26Screen::Look)
 		{
 			Goal.Lean = 15.f;
 			Goal.LookWeight = 0.f;
 		}
-		else if (!bRallyOver)
+		else if (!bRallyOver && Screen != EVC26Screen::Look)
 		{
 			const float Still = 1.f - Running;
 			Goal.Ready = 0.85f * Still;
@@ -569,41 +624,91 @@ void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, c
 		}
 		break;
 	case EPose::Pass:
+		// Legs drive up through the ball rather than the arms swinging at it.
 		Want = EClip::Idle;
-		Goal.Crouch = 32.f;
-		Goal.Lean = 34.f;
+		Goal.Crouch = 32.f - 14.f * Release;
+		Goal.Lean = 34.f - 14.f * Release;
 		Goal.Spread = 15.f;
 		Goal.Platform = 1.f;
 		break;
 	case EPose::Set:
+		// Knees and elbows extend together as the ball leaves the hands.
 		Want = EClip::Idle;
-		Goal.Crouch = 12.f;
+		Goal.Crouch = 16.f * (1.f - Release);
 		Goal.Spread = 6.f;
-		Goal.Overhead = 1.f;
+		Goal.Overhead = 1.f - 0.5f * Release;
+		Goal.Block = 0.5f * Release;
+		Goal.Open = 1.f;
 		break;
 	case EPose::Block:
+		// Loads with the hands at the shoulders, then presses over the net.
 		Want = EClip::Idle;
-		Goal.Block = 1.f;
-		break;
-	case EPose::AttackWindUp:
-		Want = EClip::Spike;
-		if (Sim->pending().active && Sim->pending().player == Player)
+		Goal.Open = 1.f;
+		if (Feet.Z > 4.f)
 		{
-			Goal.Hit = FMath::Clamp(1.f - Sim->pending().timeToContact / 0.16f, 0.f, 1.f);
+			Goal.Block = 1.f;
+			Goal.Lean = 6.f;
+		}
+		else
+		{
+			Goal.Ready = 1.f;
+			Goal.Crouch = 22.f;
+			Goal.Lean = 12.f;
+			Goal.Spread = 6.f;
 		}
 		break;
+	case EPose::AttackWindUp:
+		// The last step: hips drop and both arms go back.
+		Want = EClip::Idle;
+		Goal.Back = 1.f;
+		Goal.Crouch = 36.f;
+		Goal.Lean = 32.f;
+		Goal.Spread = 11.f;
+		break;
+	case EPose::AttackDraw:
+	{
+		// In the air: bow and arrow, chest open, then the arm whips through.
+		Want = EClip::Idle;
+		const bool bPending = Sim->pending().active && Sim->pending().player == Player;
+		const float Strike = bPending ? FMath::Clamp(1.f - Sim->pending().timeToContact / 0.14f, 0.f, 1.f) : 0.f;
+		Goal.Draw = 1.f - Strike;
+		Goal.Hit = Strike;
+		Goal.Lean = FMath::Lerp(-15.f, 8.f, Strike);
+		Goal.Turn = 40.f * (1.f - Strike);
+		Goal.Open = 1.f;
+		break;
+	}
 	case EPose::AttackSwing:
-		// Follows through a wind-up already under way.
-		Want = Figure.Clip == EClip::Spike ? EClip::Spike : EClip::Swing;
-		Goal.Hit = FMath::Clamp(Figure.SwingLeft / SwingSeconds, 0.f, 1.f);
+		// The trunk folds over the ball and the arm finishes across the body.
+		Want = EClip::Idle;
+		Goal.Hit = FMath::Clamp(1.f - Release * 2.5f, 0.f, 1.f);
+		Goal.Follow = 1.f - Goal.Hit;
+		Goal.Lean = 24.f;
+		Goal.Turn = -22.f;
 		Goal.LookWeight = 0.5f;
+		Goal.Open = 1.f;
+		break;
+	case EPose::ServeHold:
+		Want = EClip::Idle;
+		Goal.Hold = 1.f;
+		Goal.Crouch = 6.f;
+		Goal.Lean = 8.f;
+		Goal.Spread = 10.f;
+		Goal.Turn = 12.f;
 		break;
 	case EPose::ServeToss:
+	{
+		// The left arm follows the ball up, and the right draws back to meet it.
 		Want = EClip::Idle;
-		Goal.Toss = 1.f;
-		Goal.Crouch = 5.f;
-		Goal.Spread = 9.f;
+		const float Strike = FMath::Clamp((Sim->tossProgress() - 0.82f) / 0.18f, 0.f, 1.f);
+		Goal.Toss = 1.f - Strike;
+		Goal.Hit = Strike;
+		Goal.Lean = FMath::Lerp(-9.f, 6.f, Strike);
+		Goal.Turn = 30.f * (1.f - Strike);
+		Goal.Spread = 8.f;
+		Goal.Open = 1.f;
 		break;
+	}
 	case EPose::Dive:
 		Want = EClip::Dive;
 		Goal.LookWeight = 0.f;
@@ -655,11 +760,7 @@ void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, c
 	{
 		Rate = FMath::Clamp(Speed / (RunClipSpeed * Figure.Height), 0.4f, 1.4f) * (bBackpedal ? -0.8f : 1.f);
 	}
-	if (GalleryPose >= 0 && !Info.bLoop)
-	{
-		Figure.Drive.Time = 0.7f;  // the moment of the swing
-		Rate = 0.f;
-	}
+
 	Figure.Drive.Time += DeltaSeconds * Rate;
 	Figure.Drive.Time = Info.bLoop ? FMath::Fmod(Figure.Drive.Time + Length, Length) : FMath::Min(Figure.Drive.Time, Length);
 	Figure.FadeLeft = FMath::Max(Figure.FadeLeft - DeltaSeconds, 0.f);
@@ -720,6 +821,12 @@ void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, c
 	Ease(Drive.Toss, Goal.Toss, 12.f);
 	Ease(Drive.Hit, Goal.Hit, 40.f);
 	Ease(Drive.Cheer, Goal.Cheer, 16.f);
+	Ease(Drive.Turn, Goal.Turn, 16.f);
+	Ease(Drive.Back, Goal.Back, 18.f);
+	Ease(Drive.Draw, Goal.Draw, 24.f);
+	Ease(Drive.Follow, Goal.Follow, 30.f);
+	Ease(Drive.Hold, Goal.Hold, 12.f);
+	Ease(Drive.Open, Goal.Open, 16.f);
 	Ease(Drive.LookWeight, Goal.LookWeight, 8.f);
 
 	if (UVC26AthleteAnim* Anim = Cast<UVC26AthleteAnim>(Athlete->GetAnimInstance()))
@@ -814,12 +921,16 @@ AVC26Arena::EPose AVC26Arena::PoseFor(int32 Player) const
 		{
 			return EPose::Pass;
 		}
-		return Pending.spike ? EPose::AttackWindUp : EPose::Set;
+		if (Pending.spike)
+		{
+			return Sim->players()[Player].pos.z > 0.06f ? EPose::AttackDraw : EPose::AttackWindUp;
+		}
+		return EPose::Set;
 	}
 
-	if (Sim->serveCharging() && Sim->server() == Player)
+	if (Sim->phase() == vc26::RallyPhase::PreServe && Sim->server() == Player)
 	{
-		return EPose::ServeToss;
+		return Sim->serveTossing() ? EPose::ServeToss : EPose::ServeHold;
 	}
 	return Figures[Player].SwingLeft > 0.f ? Figures[Player].Swing : EPose::Idle;
 }
@@ -858,6 +969,7 @@ void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 			Shirt->SetVectorParameterValue(TEXT("Team"), Jersey);
 			Shirt->SetScalarParameterValue(TEXT("Number"), PlayerId);
 		}
+		ApplyLook(Player, LookOf(Player));
 	}
 	FVector Feet = SimToWorld(Sim->players()[Player].pos);
 	const FVector Up = FVector::UpVector;
@@ -868,7 +980,7 @@ void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 	Moved.Z = 0.f;
 	Figure.LastFeet = Feet;
 	// From the sim, as frames in slow motion can land between its steps.
-	FVector Velocity = SimToWorld(Sim->players()[Player].vel);
+	FVector Velocity = GalleryPose >= 0 ? FVector::ZeroVector : SimToWorld(Sim->players()[Player].vel);
 	Velocity.Z = 0.f;
 	const float Speed = Velocity.Size();
 	const FVector MoveDir = Velocity.GetSafeNormal();
@@ -880,9 +992,14 @@ void AVC26Arena::AnimateFigure(int32 Player, float DeltaSeconds)
 	FVector ToBall = SimToWorld(Sim->ball().pos) - Feet;
 	ToBall.Z = 0.f;
 	const FVector NetDirection(Player < 6 ? 1.f : -1.f, 0.f, 0.f);
-	const FVector WantedFacing = ToBall.Size() > 60.f ? ToBall.GetSafeNormal() : NetDirection;
+	const bool bOnShow = Screen == EVC26Screen::Look && Player == GalleryPlayer;
+	const FVector WantedFacing = bOnShow ? GalleryView.GetSafeNormal2D() : ToBall.Size() > 60.f ? ToBall.GetSafeNormal() : NetDirection;
 	Figure.Facing = (Figure.Facing + (WantedFacing - Figure.Facing) * FMath::Min(DeltaSeconds * 10.f, 1.f)).GetSafeNormal(UE_SMALL_NUMBER, NetDirection);
 	const EPose Pose = PoseFor(Player);
+	if (GalleryPose >= 0 && (Pose == EPose::AttackDraw || Pose == EPose::AttackSwing || Pose == EPose::Block))
+	{
+		Feet.Z += GalleryJump;
+	}
 	const bool bDive = Pose == EPose::Dive;
 	const FVector Forward = bDive ? Figure.DiveDirection : Figure.Facing;
 	const FVector Side = FVector::CrossProduct(Up, Forward);
@@ -1161,8 +1278,14 @@ void AVC26Arena::UpdateCamera(float DeltaSeconds)
 		// The screenshot tour's close look at one player.
 		const FVector Subject = SimToWorld(Sim->players()[GalleryPlayer].pos);
 		Desired = Subject + GalleryView;
-		LookAt = Subject + FVector(0.f, 0.f, 105.f);
+		LookAt = Subject + FVector(0.f, 0.f, GalleryAim);
 		Speed = 20.f;
+		if (GetScreen() == EVC26Screen::Look)
+		{
+			// The options fill the left of the screen, so the player stands right of centre.
+			const FVector Ahead = LookAt - Desired;
+			LookAt -= FVector::CrossProduct(FVector::UpVector, Ahead.GetSafeNormal()) * Ahead.Size() * 0.17f;
+		}
 	}
 	else if (IsReplaying())
 	{

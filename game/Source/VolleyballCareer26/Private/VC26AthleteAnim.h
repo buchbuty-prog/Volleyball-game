@@ -26,6 +26,7 @@ struct FVC26AthleteDrive
 	float Lean = 0.f;    // torso tips forward, in degrees
 	float Spread = 0.f;  // each foot moves out this far, in cm
 	float Tuck = 0.f;    // legs fold up behind, in the air
+	float Turn = 0.f;    // shoulders coil, hitting arm back, in degrees
 
 	float Ready = 0.f;     // hands out in front, waiting
 	float Platform = 0.f;  // forearms together for a pass
@@ -34,11 +35,22 @@ struct FVC26AthleteDrive
 	float Toss = 0.f;      // serve: left arm up, right arm back
 	float Hit = 0.f;       // right hand to Reach
 	float Cheer = 0.f;     // a fist in the air
+	float Back = 0.f;      // both arms behind the hips, loading a jump
+	float Draw = 0.f;      // bow and arrow: left arm up, right elbow high and back
+	float Follow = 0.f;    // the hitting arm finishes across the body
+	float Hold = 0.f;      // the ball held out, ready to serve
+	float Open = 0.f;      // fingers spread
 
 	FVector Reach = FVector(0.f, 60.f, 150.f);  // where the ball is met
 	FVector Torso = FVector(0.f, 1.f, 0.f);     // the way the shoulders face
 	FVector Look = FVector(0.f, 100.f, 170.f);  // what the eyes follow
 	float LookWeight = 0.f;
+
+	// The player's own proportions, from vc26::BodyShape.
+	float LegScale = 1.f;
+	float ArmScale = 1.f;
+	float ShoulderWidth = 1.f;
+	float HeadScale = 1.f;
 };
 
 struct FVC26AthleteProxy : public FAnimInstanceProxy
@@ -61,6 +73,7 @@ private:
 	};
 
 	void FindBones(const FBoneContainer& Container);
+	void ApplyBuild(FCompactPose& Pose);
 	void Solve(FCompactPose& Pose);
 	void Refresh(const FCompactPose& Pose);
 	void RotateBone(FCompactPose& Pose, EBone Bone, const FQuat& Delta);
@@ -75,6 +88,7 @@ private:
 		FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0),
 		FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0),
 		FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0), FCompactPoseBoneIndex(0)};
+	TArray<FCompactPoseBoneIndex> Fingers;
 	bool bBonesFound = false;
 	uint16 BonesSerial = 0;
 	FTransform Rest[BoneCount];   // the T-pose, in the athlete's space

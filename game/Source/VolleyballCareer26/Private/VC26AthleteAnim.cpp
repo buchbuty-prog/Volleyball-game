@@ -65,6 +65,50 @@ void FVC26AthleteProxy::FindBones(const FBoneContainer& Container)
 		Rest[i] = Parents[i] < 0 ? Local : Local * Rest[Parents[i]];
 	}
 	LeftSide = Rest[ArmL].GetLocation().X > 0.f ? 1.f : -1.f;
+
+	Fingers.Reset();
+	for (const TCHAR* const Side : {TEXT("left"), TEXT("right")})
+	{
+		for (const TCHAR* const Finger : {TEXT("thumb"), TEXT("index"), TEXT("middle"), TEXT("ring"), TEXT("pinky")})
+		{
+			for (int32 Joint = 1; Joint <= 3; ++Joint)
+			{
+				const int32 MeshIndex = Container.GetPoseBoneIndexForBoneName(FName(*FString::Printf(TEXT("%shand%s%d"), Side, Finger, Joint)));
+				if (MeshIndex != INDEX_NONE)
+				{
+					const FCompactPoseBoneIndex Index = Container.MakeCompactPoseIndex(FMeshPoseBoneIndex(MeshIndex));
+					if (Index != INDEX_NONE)
+					{
+						Fingers.Add(Index);
+					}
+				}
+			}
+		}
+	}
+}
+
+void FVC26AthleteProxy::ApplyBuild(FCompactPose& Pose)
+{
+	// Scaling evenly keeps every joint's rotation true, so the clips still fit.
+	FTransform& HipsLocal = Pose[Bones[Hips]];
+	FVector HipsAt = HipsLocal.GetTranslation();
+	HipsAt.Z *= Drive.LegScale;  // longer legs stand taller
+	HipsLocal.SetTranslation(HipsAt);
+	for (const EBone Bone : {ThighL, ThighR})
+	{
+		Pose[Bones[Bone]].SetScale3D(FVector(Drive.LegScale));
+	}
+	for (const EBone Bone : {FootL, FootR})
+	{
+		Pose[Bones[Bone]].SetScale3D(FVector(1.f / Drive.LegScale));
+	}
+	for (const EBone Bone : {ArmL, ArmR})
+	{
+		FTransform& Arm = Pose[Bones[Bone]];
+		Arm.SetScale3D(FVector(Drive.ArmScale));
+		Arm.SetTranslation(Arm.GetTranslation() * Drive.ShoulderWidth);
+	}
+	Pose[Bones[Head]].SetScale3D(FVector(Drive.HeadScale));
 }
 
 void FVC26AthleteProxy::Refresh(const FCompactPose& Pose)
@@ -129,6 +173,7 @@ void FVC26AthleteProxy::SolveArm(FCompactPose& Pose, bool bLeft)
 	};
 
 	Add(Drive.Ready, FromChest(20.f, 44.f, -8.f), FVector(Out, -0.4f, -1.f));
+	Add(Drive.Back, FromChest(22.f, -36.f, -60.f), FVector(Out, -1.f, 0.2f));
 
 	// The platform points at the ball, low and in front. Going past where the
 	// arms reach is what straightens the elbows.
@@ -146,16 +191,26 @@ void FVC26AthleteProxy::SolveArm(FCompactPose& Pose, bool bLeft)
 	const float Slide = FMath::Clamp(Drive.Reach.X, -MaxBlockSlide, MaxBlockSlide);
 	Add(Drive.Block, FromChest(19.f, 26.f, 95.f) + FVector(Slide, 0.f, 0.f), FVector(Out, -0.3f, 0.f));
 
+	// The ball sits on the left palm, and the right hand steadies it.
+	const FVector HoldHome = FromChest(2.f, 36.f, -16.f);
+	const FVector HoldShift = (Drive.Reach - FVector(0.f, 0.f, 9.f) - HoldHome).GetClampedToMaxSize(MaxHandShift);
+
 	if (bLeft)
 	{
 		Add(Drive.Toss, FromChest(6.f, 30.f, 70.f), FVector(Out, 0.f, -1.f));
 		Add(Drive.Hit, FromChest(14.f, 30.f, -8.f), FVector(Out, 0.f, -1.f));
+		Add(Drive.Draw, FromChest(8.f, 40.f, 76.f), FVector(Out, 0.f, -1.f));
+		Add(Drive.Follow, FromChest(20.f, 18.f, -30.f), FVector(Out, -0.4f, -0.6f));
+		Add(Drive.Hold, HoldHome + HoldShift, FVector(Out, -0.2f, -1.f));
 	}
 	else
 	{
-		Add(Drive.Toss, FromChest(30.f, -16.f, 32.f), FVector(Out, -0.5f, -0.2f));
+		Add(Drive.Toss, FromChest(26.f, -10.f, 44.f), FVector(Out, -0.8f, 0.4f));
 		Add(Drive.Hit, Drive.Reach, FVector(Out, -0.6f, -0.3f));
 		Add(Drive.Cheer, FromChest(16.f, 10.f, 90.f), FVector(Out, 0.f, -0.2f));
+		Add(Drive.Draw, FromChest(24.f, -8.f, 46.f), FVector(Out, -0.8f, 0.5f));
+		Add(Drive.Follow, FromChest(-12.f, 34.f, -46.f), FVector(Out, 0.4f, -0.6f));
+		Add(Drive.Hold, HoldHome + HoldShift + FromChest(-4.f, 2.f, 12.f) - Chest, FVector(Out, -0.2f, -1.f));
 	}
 
 	if (Total <= 0.01f)
@@ -206,6 +261,16 @@ void FVC26AthleteProxy::Solve(FCompactPose& Pose)
 		}
 	}
 
+	// A coil puts the hitting shoulder behind the other, for the whip to release.
+	if (!FMath::IsNearlyZero(Drive.Turn))
+	{
+		const FQuat Coil(Up, FMath::DegreesToRadians(Drive.Turn) * LeftSide);
+		for (const EBone Bone : {Spine, Spine1, Spine2})
+		{
+			RotateBone(Pose, Bone, PartOf(Coil, 1.f / 3.f));
+		}
+	}
+
 	// Feet stay where they were unless the stance or a jump moves them.
 	if (Drive.Crouch > 0.5f || Drive.Spread > 0.5f || Drive.Tuck > 0.01f)
 	{
@@ -230,6 +295,16 @@ void FVC26AthleteProxy::Solve(FCompactPose& Pose)
 		const FQuat Turn = PartOf(Full, Drive.LookWeight * (Angle > MaxLook ? MaxLook / Angle : 1.f));
 		RotateBone(Pose, Neck, PartOf(Turn, 0.45f));
 		RotateBone(Pose, Head, PartOf(Turn, 0.55f));
+	}
+
+	// The T-pose has flat, open fingers.
+	if (Drive.Open > 0.01f)
+	{
+		const FBoneContainer& Container = Pose.GetBoneContainer();
+		for (const FCompactPoseBoneIndex Finger : Fingers)
+		{
+			Pose[Finger].SetRotation(FQuat::Slerp(Pose[Finger].GetRotation(), Container.GetRefPoseTransform(Finger).GetRotation(), Drive.Open));
+		}
 	}
 }
 
@@ -286,6 +361,7 @@ bool FVC26AthleteProxy::Evaluate(FPoseContext& Output)
 		LastPose[Index.GetInt()] = Pose[Index];
 	}
 
+	ApplyBuild(Pose);
 	Solve(Pose);
 	return true;
 }

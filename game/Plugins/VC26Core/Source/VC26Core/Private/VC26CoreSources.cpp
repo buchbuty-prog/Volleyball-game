@@ -9,4 +9,5 @@
 #include "ServeFlight.cpp"
 #include "TouchControls.cpp"
 #include "Career.cpp"
+#include "Appearance.cpp"
 #include "Commentary.cpp"

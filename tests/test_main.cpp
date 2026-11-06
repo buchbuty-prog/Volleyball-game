@@ -5,6 +5,7 @@
 #include <functional>
 #include <vector>
 
+#include "vc26/Appearance.h"
 #include "vc26/Ball.h"
 #include "vc26/Career.h"
 #include "vc26/Commentary.h"
@@ -1519,6 +1520,98 @@ TEST(a_run_ends_when_the_other_team_scores) {
     CHECK(run.add(Team::Away) == 1);
 }
 
+TEST(generated_bodies_follow_the_real_position_averages) {
+    for (int p = 0; p < vc26::kPositions; ++p) {
+        const auto position = static_cast<vc26::Position>(p);
+        double height = 0.0, mass = 0.0;
+        constexpr int kPlayers = 2000;
+        for (int i = 0; i < kPlayers; ++i) {
+            const vc26::Appearance look = vc26::makeAppearance(position, 1000u + i * 7919u);
+            REQUIRE(vc26::isValid(look));
+            height += look.heightCm;
+            mass += look.massKg;
+        }
+        CHECK(std::fabs(height / kPlayers - vc26::positionProfile(position).heightCm) < 1.5);
+        CHECK(std::fabs(mass / kPlayers - vc26::positionProfile(position).massKg) < 2.5);
+    }
+    using vc26::Position;
+    CHECK(vc26::positionProfile(Position::Middle).heightCm > vc26::positionProfile(Position::Outside).heightCm);
+    CHECK(vc26::positionProfile(Position::Libero).heightCm < vc26::positionProfile(Position::Setter).heightCm);
+}
+
+TEST(a_team_keeps_its_faces_and_players_differ) {
+    const vc26::Appearance first = vc26::makeTeamAppearance("Harbor City", 3);
+    CHECK(vc26::encode(first) == vc26::encode(vc26::makeTeamAppearance("Harbor City", 3)));
+    int same = 0;
+    for (int shirt = 1; shirt <= 7; ++shirt) {
+        same += vc26::encode(vc26::makeTeamAppearance("Harbor City", shirt)) == vc26::encode(first);
+    }
+    CHECK(same == 1);
+    CHECK(vc26::facePreset(0) != vc26::facePreset(1));
+}
+
+TEST(body_shape_keeps_the_chosen_height) {
+    for (const int height : {170, 186, 202, 218}) {
+        vc26::Appearance look;
+        look.heightCm = height;
+        const vc26::BodyShape shape = vc26::bodyShape(look);
+        const float built = 178.f * shape.scale * (1.f + 0.54f * (shape.legs - 1.f));
+        CHECK(std::fabs(built - static_cast<float>(height)) < 0.5f);
+    }
+    vc26::Appearance lean, heavy;
+    lean.heightCm = heavy.heightCm = 200;
+    lean.massKg = 78;
+    heavy.massKg = 108;
+    CHECK(vc26::bodyShape(heavy).chest > vc26::bodyShape(lean).chest);
+    CHECK(vc26::bodyShape(heavy).shoulderWidth > vc26::bodyShape(lean).shoulderWidth);
+}
+
+TEST(height_helps_at_the_net_and_costs_on_the_floor) {
+    using vc26::Skill;
+    vc26::Appearance tall = vc26::makeAppearance(vc26::Position::Outside, 5u);
+    tall.heightCm = 212;
+    vc26::Appearance small = tall;
+    small.heightCm = 180;
+    const vc26::Career big("A", vc26::Archetype::PowerSpiker, 3u, tall);
+    const vc26::Career little("B", vc26::Archetype::PowerSpiker, 3u, small);
+    CHECK(big.skills()[static_cast<int>(Skill::Block)] > little.skills()[static_cast<int>(Skill::Block)]);
+    CHECK(big.skills()[static_cast<int>(Skill::Pass)] < little.skills()[static_cast<int>(Skill::Pass)]);
+    CHECK(vc26::spikeReachCm(tall, vc26::Position::Outside) > vc26::spikeReachCm(small, vc26::Position::Outside));
+}
+
+TEST(a_look_survives_the_save_and_old_saves_get_one) {
+    vc26::Appearance look = vc26::makeAppearance(vc26::Position::Setter, 11u);
+    look.hair = vc26::HairStyle::Mohawk;
+    look.fingerTape = true;
+    vc26::Career career("Mira Vale", vc26::Archetype::PrecisionSetter, 9u, look);
+    const std::string text = career.save();
+    const auto back = vc26::Career::load(text);
+    REQUIRE(back.has_value());
+    CHECK(vc26::encode(back->look()) == vc26::encode(look));
+    CHECK(back->save() == text);
+
+    std::string old = text;
+    old.replace(old.find("vc26career 4"), 12, "vc26career 3");
+    old.erase(old.rfind(vc26::encode(look)));
+    const auto loaded = vc26::Career::load(old);
+    REQUIRE(loaded.has_value());
+    CHECK(vc26::isValid(loaded->look()));
+
+    std::string broken = text;
+    broken.replace(broken.rfind(vc26::encode(look)), 3, "999");
+    CHECK(!vc26::Career::load(broken).has_value());
+}
+
+TEST(restyling_never_changes_the_body) {
+    vc26::Career career("Mira Vale", vc26::Archetype::PrecisionSetter, 9u);
+    const int height = career.look().heightCm;
+    vc26::Appearance next = career.look();
+    next.heightCm = height + 10;
+    next.hair = vc26::HairStyle::Bald;
+    career.restyle(next);
+    CHECK(career.look().heightCm == height);
+    CHECK(career.look().hair == vc26::HairStyle::Bald);
+}
 int main() {
     for (auto& [name, fn] : registry()) {
         const int before = g_failures;

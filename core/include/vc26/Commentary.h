@@ -14,6 +14,7 @@ constexpr int kRosterSize = 7;  // six on court and the libero
 
 // Surnames by shirt number minus one, the same for a team every time it's seen.
 using Roster = std::array<std::string, kRosterSize>;
+VC26CORE_API std::uint32_t nameHash(const std::string& text);
 VC26CORE_API Roster makeRoster(const std::string& teamName);
 
 struct PointCall {

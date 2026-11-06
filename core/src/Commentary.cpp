@@ -13,15 +13,6 @@ const char* const kSurnames[] = {
     "Eriksen", "Fontaine", "Grabowski", "Hosseini", "Ikeda", "Juarez", "Kovac", "Lemaire", "Mbeki", "Nieminen"};
 constexpr std::uint32_t kSurnameCount = sizeof(kSurnames) / sizeof(kSurnames[0]);
 
-// FNV-1a, so a team's names don't change between runs or machines.
-std::uint32_t hashOf(const std::string& text) {
-    std::uint32_t hash = 2166136261u;
-    for (const char c : text) {
-        hash = (hash ^ static_cast<std::uint8_t>(c)) * 16777619u;
-    }
-    return hash;
-}
-
 template <std::size_t N>
 std::string pickOne(const char* const (&lines)[N], std::uint32_t pick) {
     return lines[pick % N];
@@ -43,9 +34,18 @@ std::string fill(std::string line, const PointCall& call) {
 
 }  // namespace
 
+// FNV-1a, so a team's names don't change between runs or machines.
+std::uint32_t nameHash(const std::string& text) {
+    std::uint32_t hash = 2166136261u;
+    for (const char c : text) {
+        hash = (hash ^ static_cast<std::uint8_t>(c)) * 16777619u;
+    }
+    return hash;
+}
+
 Roster makeRoster(const std::string& teamName) {
     // Walking the list in steps coprime with its length never repeats a name.
-    const std::uint32_t hash = hashOf(teamName);
+    const std::uint32_t hash = nameHash(teamName);
     const std::uint32_t steps[] = {3, 7, 9, 11, 13, 17};
     const std::uint32_t step = steps[(hash >> 8) % 6];
     Roster roster;

@@ -33,6 +33,7 @@ private:
 	void DrawScoreBug(const AVC26Arena& Arena, const vc26::RallySim& Sim);
 	void DrawMainMenu(const AVC26Arena& Arena);
 	void DrawCreatePlayer(const AVC26Arena& Arena);
+	void DrawLook(const AVC26Arena& Arena);
 	void DrawHub(const AVC26Arena& Arena, const vc26::Career& Career);
 	void DrawTable(const vc26::Career& Career, float X, float Y);
 	void DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career);

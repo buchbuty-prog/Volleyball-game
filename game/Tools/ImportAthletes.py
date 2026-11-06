@@ -14,7 +14,6 @@ ANIMATIONS = {
     "Idle.fbx": "A_Idle",
     "Running.fbx": "A_Run",
     "Standing Jump.fbx": "A_Jump",
-    "Standing Melee Attack Downward.fbx": "A_Spike",
     "Run To Dive.fbx": "A_Dive",
     "Samba Dancing.fbx": "A_Celebrate",
 }
@@ -29,6 +28,9 @@ float fabric = saturate(1.0 - (hi - lo - 0.05) * 14.0) * saturate((hi - 0.1) * 8
 float shade = lerp(0.75, hi, 0.6) * 0.9 + 0.35;
 float ax = abs(P.x);
 float z = P.z;
+
+// Grey under the hair would otherwise count as fabric.
+fabric = z > 154.0 && ax < 11.5 ? 0.0 : fabric;
 
 float3 kit = (z < ShortsTop ? Shorts : Team) * shade;
 float3 skin = float3(0.62, 0.4, 0.31) * Skin * (0.75 + 0.4 * hi);
@@ -85,16 +87,135 @@ kit = lerp(kit, Print, digit);
 
 float3 result = lerp(C * Skin, kit, fabric);
 
-// Short sleeves, bare shins, and low socks. Football boots stay as they are.
+// Short sleeves, bare shins, and socks low or high.
+float high = KitB.y;
 float sleeve = ax > 32.0 && z > 110.0 ? 1.0 : 0.0;
-float shin = z > 21.0 && z < 41.0 ? 1.0 : 0.0;
+float shin = z > 21.0 && z < 41.0 && high < 0.5 ? 1.0 : 0.0;
 result = lerp(result, skin, fabric * max(sleeve, shin));
-float pad = z > 40.0 && z < 57.0 ? 1.0 : 0.0;
-result = lerp(result, float3(0.02, 0.02, 0.025), pad);
-float sock = z < 21.0 ? 1.0 : 0.0;
+float pad = z > 40.0 && z < 57.0 ? KitB.z : 0.0;
+result = lerp(result, Knee * (0.6 + 0.5 * hi), pad);
+float sock = z < (high > 0.5 ? 40.0 : 21.0) ? 1.0 : 0.0;
 result = lerp(result, float3(0.8, 0.8, 0.82) * shade, fabric * sock);
-float boot = z < 11.0 ? 1.0 : 0.0;
-return lerp(result, C, boot);"""
+
+// Arms: a compression sleeve, ink and finger tape. Which side is the hitting arm
+// comes from the rig: the right arm lies along -X.
+float arm = ax > 30.0 && ax < 66.0 && z > 125.0 ? 1.0 : 0.0;
+float ink = 0.0;
+if (KitB.x > 1.5)
+{
+    ink = ax > 46.0 && ax < 66.0 ? 0.55 + 0.35 * sin(ax * 2.1 + P.y * 1.4) : 0.0;
+}
+else if (KitB.x > 0.5)
+{
+    ink = (ax > 38.0 && ax < 40.5) || (ax > 41.5 && ax < 42.5) ? 0.85 : 0.0;
+}
+result = lerp(result, float3(0.03, 0.05, 0.07), arm * ink);
+float wanted = KitA.z > 2.5 ? 1.0 : KitA.z > 1.5 ? step(0.0, P.x) : KitA.z > 0.5 ? step(P.x, 0.0) : 0.0;
+result = lerp(result, float3(0.025, 0.025, 0.03) * (0.7 + 0.6 * hi), arm * wanted);
+float tape = KitC.y * (ax > 73.0 && z > 125.0 && frac(ax / 2.4) < 0.45 ? 1.0 : 0.0);
+result = lerp(result, float3(0.82, 0.82, 0.8), tape);
+
+// The scalp shows wherever a style leaves it, from bare skin to a close shave.
+float head = z > 150.0 && ax < 11.5 ? 1.0 : 0.0;
+float hairline = lerp(160.0, 170.5, saturate((P.y + 2.0) / 10.0));
+float scalp = head * saturate((z - hairline) / 1.5);
+float style = KitA.y;
+float cover = style > 5.5 ? 0.5 : style > 3.5 ? (style > 4.5 ? 0.9 : 0.12) : style > 2.5 ? 0.0 : style > 1.5 ? 0.72 : 0.9;
+float3 hairTint = Hair * 0.8 + 0.012;
+float3 bare = float3(0.4, 0.25, 0.19) * Skin;  // the top of the head catches more light
+result = lerp(result, lerp(bare, hairTint, cover), scalp);
+
+// Facial hair, painted over the skin below the nose.
+float grain = frac(sin(dot(P.xz, float2(91.7, 47.3))) * 43758.5);
+float front = head * saturate((P.y - 0.5) / 2.0);
+float top = 156.6 + 0.32 * ax;  // a beard climbs towards the ears
+float jaw = front * (1.0 - smoothstep(top - 0.8, top + 0.6, z)) * smoothstep(151.0, 152.6, z);
+float2 m = float2(ax / 2.9, (z - 157.2) / 1.0);
+float mouth = smoothstep(0.75, 1.1, length(m));
+float curve = 158.75 - 0.07 * ax * ax;
+float lip = front * (1.0 - smoothstep(0.45, 0.85, abs(z - curve))) * (1.0 - smoothstep(2.9, 3.9, ax));
+float2 c = float2(ax / 3.1, (z - 154.6) / 2.1);
+float chin = front * (1.0 - smoothstep(0.75, 1.05, length(c)));
+float beard = KitA.x > 3.5 ? max(jaw * mouth, lip) : KitA.x > 2.5 ? max(chin * mouth, lip) : KitA.x > 1.5 ? lip : 0.0;
+beard *= 0.72 + 0.28 * grain;
+float stubble = KitA.x > 0.5 && KitA.x < 1.5 ? jaw * mouth * 0.55 * step(0.45, grain) : 0.0;
+result = lerp(result, Hair * 0.7 + 0.012, max(beard, stubble));
+
+// A headband sits on the forehead and round the skull.
+float band = KitC.x * head * (z > 170.0 && z < 172.6 ? 1.0 : 0.0);
+result = lerp(result, BandColor, band);
+
+// Volleyball shoes: a coloured upper, a stripe, and a pale rubber sole.
+float3 shoe = ShoeBase * (0.55 + 0.7 * hi);
+shoe = lerp(shoe, ShoeAccent, z > 5.5 && z < 7.8 ? 1.0 : 0.0);
+shoe = lerp(shoe, float3(0.8, 0.8, 0.78), z < 3.2 ? 1.0 : 0.0);
+return lerp(result, shoe, z < 13.0 ? 1.0 : 0.0);"""
+
+# Runs per vertex, so one mesh can be many people. Each bump swells or sinks the
+# skin along its normal around a landmark measured on the T-pose, in cm. Kit and
+# skin share the same bumps, so nothing pokes through. The studs flatten into the sole.
+SHAPE_SHADER = """float ax = abs(P.x);
+float z = P.z;
+float3 s = float3(ax, P.y, z);
+float off = 0.0;
+float3 d;
+
+d = (P - float3(0.0, 14.0, 161.0)) / float3(1.8, 3.0, 2.4);
+off += FaceA.x * 0.9 * exp(-dot(d, d));
+d = (s - float3(6.5, 7.0, 155.5)) / float3(2.8, 4.0, 3.0);
+off += FaceA.y * 1.0 * exp(-dot(d, d));
+d = (P - float3(0.0, 12.0, 153.5)) / float3(3.0, 3.0, 2.2);
+off += FaceA.z * 0.9 * exp(-dot(d, d));
+d = (s - float3(7.5, 9.0, 162.0)) / float3(2.6, 3.5, 2.4);
+off += FaceB.x * 0.7 * exp(-dot(d, d));
+d = (P - float3(0.0, 11.5, 167.5)) / float3(6.0, 2.2, 1.5);
+off += FaceB.y * 0.6 * exp(-dot(d, d));
+d = (P - float3(0.0, 10.0, 172.0)) / float3(7.0, 3.0, 3.0);
+off += FaceB.z * 0.6 * exp(-dot(d, d));
+d = (P - float3(0.0, 13.0, 157.3)) / float3(3.0, 1.6, 1.1);
+off += FaceC.x * 0.4 * exp(-dot(d, d));
+
+d = (s - float3(24.0, 0.0, 141.0)) / float3(8.0, 9.0, 8.0);
+off += BodyA.x * exp(-dot(d, d));
+float upper = saturate((ax - 28.0) / 3.0) * saturate((50.0 - ax) / 4.0) * step(125.0, z);
+float lower = saturate((ax - 48.0) / 3.0) * saturate((66.0 - ax) / 4.0) * step(125.0, z);
+off += BodyA.y * (upper + lower * 0.5);
+float torso = saturate((19.0 - ax) / 3.0);
+off += BodyA.z * torso * saturate((z - 116.0) / 8.0) * saturate((148.0 - z) / 6.0);
+off += BodyB.x * torso * saturate((z - 90.0) / 6.0) * saturate((124.0 - z) / 8.0);
+// It fades out above the shorts' hem, whose inside faces the other way.
+off += BodyB.y * saturate((z - 61.0) / 8.0) * saturate((96.0 - z) / 6.0) * step(ax, 24.0);
+off += BodyB.z * saturate((z - 12.0) / 6.0) * saturate((48.0 - z) / 6.0) * step(ax, 24.0);
+
+return N * off + float3(0.0, 0.0, max(1.25 - z, 0.0));"""
+
+# The hair is one haircut, so the others are cut from it. Lashes share the mesh.
+HAIR_SHADER = """float ax = abs(P.x);
+float z = P.z;
+float lash = P.y > 9.0 && z < 167.5 && ax < 6.0 ? 1.0 : 0.0;
+float keep = 1.0;
+float style = Style.x;
+if (style > 5.5)
+{
+    keep = ax < 6.5 && z > 168.0 ? 1.0 : 0.0;
+}
+else if (style > 4.5)
+{
+    keep = 1.0;
+}
+else if (style > 3.5)
+{
+    keep = ax < 2.8 ? 1.0 : 0.0;
+}
+else if (style > 1.5)
+{
+    keep = 0.0;
+}
+else if (style > 0.5)
+{
+    keep = z > 169.0 ? 1.0 : 0.0;
+}
+return A * max(keep, lash);"""
 
 tools = unreal.AssetToolsHelpers.get_asset_tools()
 editing = unreal.MaterialEditingLibrary
@@ -138,6 +259,17 @@ def import_animations(skeleton):
         import_file(file_name, asset_name, options)
 
 
+def connect_pins(custom, pins):
+    inputs = []
+    for name, _, _ in pins:
+        pin = unreal.CustomInput()
+        pin.set_editor_property("input_name", name)
+        inputs.append(pin)
+    custom.set_editor_property("inputs", inputs)
+    for name, node, output in pins:
+        editing.connect_material_expressions(node, output, custom, name)
+
+
 def build_kit_material():
     path = DEST + "/M_AthleteTeam"
     if unreal.EditorAssetLibrary.does_asset_exist(path):
@@ -159,31 +291,34 @@ def build_kit_material():
 
     white = unreal.LinearColor(1, 1, 1, 1)
     colours = {name: parameter(unreal.MaterialExpressionVectorParameter, name, white, 500 + i * 120)
-               for i, name in enumerate(("Team", "Shorts", "Print", "Skin"))}
-    number = parameter(unreal.MaterialExpressionScalarParameter, "Number", 7.0, 1000)
-    shorts_top = parameter(unreal.MaterialExpressionScalarParameter, "ShortsTop", 90.0, 1100)
-    texcoord = editing.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -700, 1200)
+               for i, name in enumerate(("Team", "Shorts", "Print", "Skin", "Hair", "ShoeBase", "ShoeAccent", "Knee", "BandColor"))}
+    black = unreal.LinearColor(0, 0, 0, 1)
+    shape = {name: parameter(unreal.MaterialExpressionVectorParameter, name, black, 1600 + i * 120)
+             for i, name in enumerate(("FaceA", "FaceB", "FaceC", "BodyA", "BodyB", "KitA", "KitB", "KitC"))}
+    number = parameter(unreal.MaterialExpressionScalarParameter, "Number", 7.0, 2600)
+    shorts_top = parameter(unreal.MaterialExpressionScalarParameter, "ShortsTop", 90.0, 2700)
+    texcoord = editing.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -700, 2800)
 
     # Skinned positions only exist in the vertex shader, so they're passed along.
-    rest = editing.create_material_expression(material, unreal.MaterialExpressionPreSkinnedPosition, -900, 1300)
-    carried = editing.create_material_expression(material, unreal.MaterialExpressionVertexInterpolator, -700, 1300)
+    rest = editing.create_material_expression(material, unreal.MaterialExpressionPreSkinnedPosition, -900, 2900)
+    carried = editing.create_material_expression(material, unreal.MaterialExpressionVertexInterpolator, -700, 2900)
     editing.connect_material_expressions(rest, "", carried, "")
 
     kit = editing.create_material_expression(material, unreal.MaterialExpressionCustom, -300, 0)
     kit.set_editor_property("code", KIT_SHADER)
     kit.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
-    pins = (("C", diffuse, "RGB"), ("Team", colours["Team"], ""), ("Shorts", colours["Shorts"], ""),
-            ("Print", colours["Print"], ""), ("Skin", colours["Skin"], ""), ("Number", number, ""),
-            ("ShortsTop", shorts_top, ""), ("UV", texcoord, ""), ("P", carried, ""))
-    inputs = []
-    for name, _, _ in pins:
-        pin = unreal.CustomInput()
-        pin.set_editor_property("input_name", name)
-        inputs.append(pin)
-    kit.set_editor_property("inputs", inputs)
-    for name, node, output in pins:
-        editing.connect_material_expressions(node, output, kit, name)
+    pins = [("C", diffuse, "RGB"), ("Number", number, ""), ("ShortsTop", shorts_top, ""), ("UV", texcoord, ""), ("P", carried, "")]
+    pins += [(name, colours[name], "") for name in colours]
+    pins += [(name, shape[name], "") for name in ("KitA", "KitB", "KitC")]
+    connect_pins(kit, pins)
     editing.connect_material_property(kit, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    normal_ws = editing.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, -500, 3000)
+    reshape = editing.create_material_expression(material, unreal.MaterialExpressionCustom, -300, 500)
+    reshape.set_editor_property("code", SHAPE_SHADER)
+    reshape.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
+    connect_pins(reshape, [("P", rest, ""), ("N", normal_ws, "")] + [(name, shape[name], "") for name in ("FaceA", "FaceB", "FaceC", "BodyA", "BodyB")])
+    editing.connect_material_property(reshape, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     editing.connect_material_property(normal, "RGB", unreal.MaterialProperty.MP_NORMAL)
 
     # Matte, like fabric. A shiny kit washes out under the arena lights.
@@ -214,13 +349,37 @@ def build_hair_material():
     tint.set_editor_property("parameter_name", "Hair")
     tint.set_editor_property("default_value", unreal.LinearColor(0.03, 0.02, 0.015, 1))
 
+    style = editing.create_material_expression(material, unreal.MaterialExpressionVectorParameter, -700, 720)
+    style.set_editor_property("parameter_name", "HairStyle")
+    style.set_editor_property("default_value", unreal.LinearColor(0, 0, 0, 1))
+    band = editing.create_material_expression(material, unreal.MaterialExpressionVectorParameter, -700, 840)
+    band.set_editor_property("parameter_name", "BandColor")
+    band.set_editor_property("default_value", unreal.LinearColor(0, 0, 0, 1))
+    rest = editing.create_material_expression(material, unreal.MaterialExpressionPreSkinnedPosition, -900, 960)
+    carried = editing.create_material_expression(material, unreal.MaterialExpressionVertexInterpolator, -700, 960)
+    editing.connect_material_expressions(rest, "", carried, "")
+
     # The hair texture is near black, so the colour replaces it and the texture only shades.
-    mixed = editing.create_material_expression(material, unreal.MaterialExpressionAdd, -300, 100)
-    editing.connect_material_expressions(diffuse, "RGB", mixed, "A")
-    editing.connect_material_expressions(tint, "", mixed, "B")
+    mixed = editing.create_material_expression(material, unreal.MaterialExpressionCustom, -300, 100)
+    mixed.set_editor_property("code", "float inBand = Style.y > 0.5 && P.z > 170.0 && P.z < 172.6 ? 1.0 : 0.0;\nreturn lerp(C + Tint, Band, inBand);")
+    mixed.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
+    connect_pins(mixed, [("C", diffuse, "RGB"), ("Tint", tint, ""), ("Style", style, ""), ("Band", band, ""), ("P", carried, "")])
     editing.connect_material_property(mixed, "", unreal.MaterialProperty.MP_BASE_COLOR)
     editing.connect_material_property(normal, "RGB", unreal.MaterialProperty.MP_NORMAL)
-    editing.connect_material_property(diffuse, "A", unreal.MaterialProperty.MP_OPACITY_MASK)
+
+    cut = editing.create_material_expression(material, unreal.MaterialExpressionCustom, -300, 300)
+    cut.set_editor_property("code", HAIR_SHADER)
+    cut.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT1)
+    connect_pins(cut, [("A", diffuse, "A"), ("Style", style, ""), ("P", carried, "")])
+    editing.connect_material_property(cut, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+
+    # Curls stand off the head.
+    normal_ws = editing.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, -500, 1100)
+    lift = editing.create_material_expression(material, unreal.MaterialExpressionCustom, -300, 500)
+    lift.set_editor_property("code", "return N * (Style.x > 4.5 && Style.x < 5.5 ? 1.8 : 0.0);")
+    lift.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
+    connect_pins(lift, [("N", normal_ws, ""), ("Style", style, "")])
+    editing.connect_material_property(lift, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
 
     editing.recompile_material(material)
     unreal.EditorAssetLibrary.save_asset(path)

@@ -158,9 +158,26 @@ int leaguePoints(int setsFor, int setsAgainst) {
 Career::Career(std::string name, Archetype archetype, std::uint32_t seed)
     : name_(std::move(name)), archetype_(archetype), rng_(seed ? seed : 1u) {
     skills_ = startingSkills(archetype);
+    look_ = makeAppearance(position(), rng_);
     buildLeague();
 }
 
+Career::Career(std::string name, Archetype archetype, std::uint32_t seed, const Appearance& look) : Career(std::move(name), archetype, seed) {
+    look_ = look;
+    const SkillRatings edge = physiqueEdge(look, position());
+    for (int i = 0; i < kSkills; ++i) {
+        skills_[i] = std::clamp(skills_[i] + edge[i], kMinSkill, kMaxSkill);
+    }
+}
+
+void Career::restyle(const Appearance& look) {
+    if (!isValid(look)) return;
+    const Appearance body = look_;
+    look_ = look;
+    look_.heightCm = body.heightCm;
+    look_.massKg = body.massKg;
+    look_.arms = body.arms;
+}
 SkillRatings Career::startingSkills(Archetype archetype) {
     SkillRatings skills;
     skills.fill(50);
@@ -480,7 +497,7 @@ bool Career::upgrade(Skill s) {
 std::string Career::save() const {
     std::ostringstream out;
     out.precision(9);  // enough to bring a float back exactly
-    out << "vc26career 3\n" << name_ << '\n';
+    out << "vc26career 4\n" << name_ << '\n';
     out << static_cast<int>(archetype_) << ' ' << rng_ << ' ' << skillPoints_ << ' ' << static_cast<int>(tier_) << ' ' << season_ << ' '
         << round_ << ' ' << static_cast<int>(stage_) << ' ' << scout_ << ' ' << trophies_ << ' ' << matches_ << ' ' << ratingTotal_ << ' '
         << wonFinal_ << ' ' << promoted_ << '\n';
@@ -502,6 +519,7 @@ std::string Career::save() const {
             << r.season << ' ' << static_cast<int>(r.tier) << ' ' << r.position << ' ' << r.won << ' ' << r.lost << ' ' << r.rating << ' ' << r.champion << ' '
             << r.promoted << ' ' << r.mvp << '\n';
     }
+    out << encode(look_) << '\n';
     return out.str();
 }
 
@@ -509,7 +527,8 @@ std::optional<Career> Career::load(const std::string& text) {
     std::istringstream in(text);
     std::string header;
     std::getline(in, header);
-    const bool version3 = header == "vc26career 3";
+    const bool version4 = header == "vc26career 4";
+    const bool version3 = version4 || header == "vc26career 3";
     const bool version2 = version3 || header == "vc26career 2";
     if (!version2 && header != "vc26career 1") return std::nullopt;
 
@@ -559,6 +578,13 @@ std::optional<Career> Career::load(const std::string& text) {
         return std::nullopt;
     }
     c.archetype_ = static_cast<Archetype>(archetype);
+    c.look_ = makeAppearance(c.position(), c.rng_);  // saves from before looks get one
+    if (version4) {
+        std::string line;
+        in >> std::ws;
+        std::getline(in, line);
+        if (!decode(line, c.look_)) return std::nullopt;
+    }
     c.tier_ = static_cast<Tier>(tier);
     c.stage_ = static_cast<CareerStage>(stage);
     return c;

@@ -168,7 +168,48 @@ void AVC26Hud::DrawCreatePlayer(const AVC26Arena& Arena)
 		DrawMeter(760.f, Y + 14.f, 480.f, vc26::skillFill(Value), Value > 55 ? Gold : FLinearColor(0.35f, 0.5f, 0.8f));
 		Label(FString::FromInt(Value), 1270.f, Y, FLinearColor::White, 1.4f);
 	}
-	DrawCentred(TEXT("You play only your own position. Left / Right arrows to choose, Enter to start"), 820.f, Muted, 1.2f);
+	DrawCentred(TEXT("You play only your own position. Left / Right arrows to choose, Enter to build your player"), 820.f, Muted, 1.2f);
+}
+
+void AVC26Hud::DrawLook(const AVC26Arena& Arena)
+{
+	Panel(0.f, 0.f, 640.f, 1080.f, Ink);
+	Panel(640.f, 0.f, 6.f, 1080.f, Gold);
+	Label(Arena.IsCreatingLook() ? TEXT("BUILD YOUR PLAYER") : TEXT("CHANGE YOUR LOOK"), 40.f, 22.f, FLinearColor::White, 1.7f);
+
+	const TArray<FVC26MenuItem> Items = Arena.GetMenuItems();
+	constexpr float RowHeight = 38.f;
+	const float Top = 84.f;
+	for (int32 i = 0; i < Items.Num(); ++i)
+	{
+		const bool bSelected = i == Arena.GetMenuIndex();
+		const float Y = Top + i * RowHeight;
+		const FLinearColor Text = bSelected ? FLinearColor(0.02f, 0.03f, 0.07f) : FLinearColor::White;
+		if (bSelected)
+		{
+			Panel(30.f, Y, 580.f, RowHeight - 3.f, Gold);
+		}
+		Label(Items[i].Label, 44.f, Y + 5.f, Text, 1.f);
+		if (!Items[i].Value.IsEmpty())
+		{
+			Label(bSelected ? FString::Printf(TEXT("<  %s  >"), *Items[i].Value) : Items[i].Value, 340.f, Y + 5.f, bSelected ? Text : Muted, 1.f);
+		}
+	}
+
+	// What the body means on court, next to the real averages for the position.
+	const vc26::Appearance& Look = Arena.GetDraftLook();
+	const vc26::Position Position = Arena.GetDraftPosition();
+	const vc26::PositionProfile& Profile = vc26::positionProfile(Position);
+	Panel(1290.f, 40.f, 590.f, 250.f, Ink);
+	Label(Str(vc26::toString(Position)), 1314.f, 56.f, Gold, 1.3f);
+	Label(FString::Printf(TEXT("Spike reach %d cm      Block reach %d cm"), vc26::spikeReachCm(Look, Position), vc26::blockReachCm(Look, Position)), 1314.f, 106.f, FLinearColor::White, 1.05f);
+	Label(FString::Printf(TEXT("Olympic average: %.0f cm, %.0f kg"), Profile.heightCm, Profile.massKg), 1314.f, 144.f, Muted, 1.f);
+	if (Arena.IsCreatingLook())
+	{
+		const vc26::SkillRatings Edge = vc26::physiqueEdge(Look, Position);
+		Label(FString::Printf(TEXT("Attack %+d   Block %+d   Pass %+d"), Edge[static_cast<int32>(vc26::Skill::Attack)], Edge[static_cast<int32>(vc26::Skill::Block)], Edge[static_cast<int32>(vc26::Skill::Pass)]), 1314.f, 182.f, FLinearColor::White, 1.05f);
+	}
+	Label(TEXT("Up / Down to choose, Left / Right to change"), 1314.f, 240.f, Muted, 0.95f);
 }
 
 void AVC26Hud::DrawTable(const vc26::Career& Career, float X, float Y)
@@ -234,13 +275,13 @@ void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
 	DrawMeter(84.f, 468.f, 750.f, Career.scoutInterest() / 100.f, Gold);
 	Label(TEXT("Reach 100% to earn a move up, even without the title"), 84.f, 490.f, Muted, 1.f);
 
-	DrawItems(Arena, 60.f, 560.f, 800.f);
-	Label(FString::Printf(TEXT("Skill points: %d      Average rating: %.1f      Trophies: %d"), Career.skillPoints(), Career.averageRating(), Career.trophies()), 60.f, 836.f, FLinearColor::White, 1.2f);
-	Label(TEXT("Coach trust"), 60.f, 882.f, Muted, 1.05f);
-	DrawMeter(280.f, 892.f, 580.f, Career.coachTrust() / 100.f, FLinearColor(0.3f, 0.75f, 0.45f));
-	Label(TEXT("Chemistry"), 60.f, 920.f, Muted, 1.05f);
-	DrawMeter(280.f, 930.f, 580.f, Career.chemistry() / 100.f, FLinearColor(0.35f, 0.55f, 0.95f));
-	Label(FString::Printf(TEXT("vs %s: %d-%d"), *Str(vc26::Career::rivalName()), Career.rivalWins(), Career.rivalLosses()), 60.f, 958.f, Muted, 1.05f);
+	DrawItems(Arena, 60.f, 544.f, 800.f);
+	Label(FString::Printf(TEXT("Skill points: %d      Average rating: %.1f      Trophies: %d"), Career.skillPoints(), Career.averageRating(), Career.trophies()), 60.f, 884.f, FLinearColor::White, 1.2f);
+	Label(TEXT("Coach trust"), 60.f, 926.f, Muted, 1.05f);
+	DrawMeter(280.f, 936.f, 580.f, Career.coachTrust() / 100.f, FLinearColor(0.3f, 0.75f, 0.45f));
+	Label(TEXT("Chemistry"), 60.f, 960.f, Muted, 1.05f);
+	DrawMeter(280.f, 970.f, 580.f, Career.chemistry() / 100.f, FLinearColor(0.35f, 0.55f, 0.95f));
+	Label(FString::Printf(TEXT("vs %s: %d-%d"), *Str(vc26::Career::rivalName()), Career.rivalWins(), Career.rivalLosses()), 60.f, 994.f, Muted, 1.05f);
 
 	DrawTable(Career, 1000.f, 180.f);
 }
@@ -566,7 +607,7 @@ void AVC26Hud::DrawHUD()
 	}
 
 	// Dims the arena behind the career screens so they stay readable.
-	if (Arena->GetScreen() != EVC26Screen::MainMenu && Arena->GetScreen() != EVC26Screen::Match)
+	if (Arena->GetScreen() != EVC26Screen::MainMenu && Arena->GetScreen() != EVC26Screen::Match && Arena->GetScreen() != EVC26Screen::Look)
 	{
 		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), 0.f, 0.f, Canvas->ClipX, Canvas->ClipY);
 	}
@@ -576,6 +617,7 @@ void AVC26Hud::DrawHUD()
 	{
 	case EVC26Screen::MainMenu: DrawMainMenu(*Arena); break;
 	case EVC26Screen::CreatePlayer: DrawCreatePlayer(*Arena); break;
+	case EVC26Screen::Look: DrawLook(*Arena); break;
 	case EVC26Screen::Match: DrawMatch(*Arena, *Sim); break;
 	case EVC26Screen::Hub: if (Career) { DrawHub(*Arena, *Career); } break;
 	case EVC26Screen::Upgrades: if (Career) { DrawUpgrades(*Arena, *Career); } break;

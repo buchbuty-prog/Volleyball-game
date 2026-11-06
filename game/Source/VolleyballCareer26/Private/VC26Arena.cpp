@@ -133,6 +133,161 @@ void AVC26Arena::SetRosters()
 	LastTouch[0] = LastTouch[1] = -1;
 	Commentary.Reset();
 	CommentaryTimeLeft = 0.f;
+	for (FFigure& Figure : Figures)
+	{
+		Figure.ShownId = -1;  // new people in these bodies
+	}
+}
+
+vc26::Appearance AVC26Arena::LookOf(int32 Player) const
+{
+	const vc26::SimPlayer& Body = Sim->players()[Player];
+	if (bCareerMatch && Career.IsSet() && Player == Career->lockedPlayer())
+	{
+		return Career->look();
+	}
+	return vc26::makeTeamAppearance(TCHAR_TO_UTF8(*(Body.team == vc26::Team::Home ? HomeName : AwayName)), Body.id);
+}
+
+vc26::Position AVC26Arena::GetDraftPosition() const
+{
+	if (bRestyling && Career.IsSet())
+	{
+		return Career->position();
+	}
+	// The same bodies Career::lockedPlayer gives each kind of player.
+	switch (GetChosenArchetype())
+	{
+	case vc26::Archetype::PrecisionSetter: return vc26::Position::Setter;
+	case vc26::Archetype::BlockSpecialist: return vc26::Position::Opposite;
+	default: return vc26::Position::Outside;
+	}
+}
+
+void AVC26Arena::OpenLook(bool bRestyle)
+{
+	bRestyling = bRestyle;
+	DraftFace = 0;
+	if (!bRestyle)
+	{
+		DraftLook = vc26::makeAppearance(GetDraftPosition(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
+	}
+	else
+	{
+		DraftLook = Career->look();
+	}
+	GoTo(EVC26Screen::Look);
+	GalleryPose = static_cast<int32>(EPose::Idle);
+	GalleryPlayer = 0;
+	ShowLookPreview();
+}
+
+void AVC26Arena::CloseLook()
+{
+	GalleryPose = -1;
+	Figures[GalleryPlayer].ShownId = -1;  // back to whoever this body really is
+}
+
+void AVC26Arena::ShowLookPreview()
+{
+	if (!Athletes.IsEmpty())
+	{
+		ApplyLook(GalleryPlayer, DraftLook);
+	}
+	// Close on the face for the face, and back for the body and kit.
+	const TArray<FVC26MenuItem> Items = GetMenuItems();
+	const bool bRow = Items.IsValidIndex(MenuIndex) && Items[MenuIndex].Action == EVC26MenuAction::LookRow;
+	const ELookRow Row = bRow ? static_cast<ELookRow>(Items[MenuIndex].Arg) : ELookRow::Height;
+	const bool bFace = Row >= ELookRow::Face && Row <= ELookRow::Headband;
+	const float Tall = static_cast<float>(DraftLook.heightCm);
+	GalleryAim = bFace ? Tall * 0.93f : Tall * 0.52f;
+	GalleryView = bFace ? FVector(95.f, 40.f, Tall * 0.93f) : FVector(340.f, 130.f, Tall * 0.55f);
+}
+
+FString AVC26Arena::LookRowText(ELookRow Row) const
+{
+	static const TCHAR* const Colours[] = {TEXT("Black"), TEXT("Dark Brown"), TEXT("Brown"), TEXT("Auburn"), TEXT("Blond"), TEXT("Grey"), TEXT("Dyed Red")};
+	static const TCHAR* const Bands[] = {TEXT("None"), TEXT("Black"), TEXT("White"), TEXT("Team Colour")};
+	static const TCHAR* const Shoes[] = {TEXT("White"), TEXT("Black"), TEXT("Volt"), TEXT("Red"), TEXT("Royal"), TEXT("Sunset")};
+	static const TCHAR* const Sleeves[] = {TEXT("None"), TEXT("Hitting Arm"), TEXT("Other Arm"), TEXT("Both")};
+	static const TCHAR* const Tattoos[] = {TEXT("None"), TEXT("Bands"), TEXT("Forearm")};
+	const vc26::Appearance& Look = DraftLook;
+	auto Shape = [&Look](vc26::FaceShape Part) { return FString::Printf(TEXT("%+d"), Look.face[static_cast<int32>(Part)]); };
+	switch (Row)
+	{
+	case ELookRow::Height: return FString::Printf(TEXT("%d cm"), Look.heightCm);
+	case ELookRow::Mass: return FString::Printf(TEXT("%d kg"), Look.massKg);
+	case ELookRow::Arms: return FString::Printf(TEXT("%+d"), Look.arms);
+	case ELookRow::Face: return FString::Printf(TEXT("%d of %d"), DraftFace + 1, vc26::kFacePresets);
+	case ELookRow::Nose: return Shape(vc26::FaceShape::Nose);
+	case ELookRow::Jaw: return Shape(vc26::FaceShape::Jaw);
+	case ELookRow::Chin: return Shape(vc26::FaceShape::Chin);
+	case ELookRow::Cheeks: return Shape(vc26::FaceShape::Cheeks);
+	case ELookRow::Brow: return Shape(vc26::FaceShape::Brow);
+	case ELookRow::Forehead: return Shape(vc26::FaceShape::Forehead);
+	case ELookRow::Lips: return Shape(vc26::FaceShape::Lips);
+	case ELookRow::Skin: return FString::Printf(TEXT("%d of %d"), Look.skin + 1, vc26::kSkinTones);
+	case ELookRow::Hair: return UTF8_TO_TCHAR(vc26::toString(Look.hair));
+	case ELookRow::HairColour: return Colours[Look.hairColour];
+	case ELookRow::FacialHair: return UTF8_TO_TCHAR(vc26::toString(Look.facialHair));
+	case ELookRow::Headband: return Bands[Look.headband];
+	case ELookRow::Shoes: return Shoes[Look.shoes];
+	case ELookRow::Knees: return Bands[Look.kneeSleeve];
+	case ELookRow::ArmSleeve: return Sleeves[Look.armSleeve];
+	case ELookRow::Socks: return Look.highSocks ? TEXT("High") : TEXT("Low");
+	case ELookRow::Tattoo: return Tattoos[Look.tattoo];
+	case ELookRow::Tape: return Look.fingerTape ? TEXT("Taped") : TEXT("None");
+	default: return FString();
+	}
+}
+
+void AVC26Arena::ChangeLookRow(ELookRow Row, int32 Step)
+{
+	vc26::Appearance& Look = DraftLook;
+	auto Wrap = [Step](int32& Value, int32 Count) { Value = (Value + Step + Count) % Count; };
+	auto Slide = [Step](int32& Value, int32 Low, int32 High) { Value = FMath::Clamp(Value + Step, Low, High); };
+	auto Part = [&Look, &Slide](vc26::FaceShape Shape) { Slide(Look.face[static_cast<int32>(Shape)], -vc26::kFaceRange, vc26::kFaceRange); };
+	switch (Row)
+	{
+	case ELookRow::Height: Slide(Look.heightCm, vc26::kMinHeight, vc26::kMaxHeight); break;
+	case ELookRow::Mass: Slide(Look.massKg, vc26::kMinMass, vc26::kMaxMass); break;
+	case ELookRow::Arms: Slide(Look.arms, -vc26::kArmRange, vc26::kArmRange); break;
+	case ELookRow::Face:
+		Wrap(DraftFace, vc26::kFacePresets);
+		Look.face = vc26::facePreset(DraftFace);
+		break;
+	case ELookRow::Nose: Part(vc26::FaceShape::Nose); break;
+	case ELookRow::Jaw: Part(vc26::FaceShape::Jaw); break;
+	case ELookRow::Chin: Part(vc26::FaceShape::Chin); break;
+	case ELookRow::Cheeks: Part(vc26::FaceShape::Cheeks); break;
+	case ELookRow::Brow: Part(vc26::FaceShape::Brow); break;
+	case ELookRow::Forehead: Part(vc26::FaceShape::Forehead); break;
+	case ELookRow::Lips: Part(vc26::FaceShape::Lips); break;
+	case ELookRow::Skin: Wrap(Look.skin, vc26::kSkinTones); break;
+	case ELookRow::Hair:
+	{
+		int32 Style = static_cast<int32>(Look.hair);
+		Wrap(Style, vc26::kHairStyles);
+		Look.hair = static_cast<vc26::HairStyle>(Style);
+		break;
+	}
+	case ELookRow::HairColour: Wrap(Look.hairColour, vc26::kHairColours); break;
+	case ELookRow::FacialHair:
+	{
+		int32 Style = static_cast<int32>(Look.facialHair);
+		Wrap(Style, vc26::kFacialHairs);
+		Look.facialHair = static_cast<vc26::FacialHair>(Style);
+		break;
+	}
+	case ELookRow::Headband: Wrap(Look.headband, vc26::kHeadbands); break;
+	case ELookRow::Shoes: Wrap(Look.shoes, vc26::kShoes); break;
+	case ELookRow::Knees: Wrap(Look.kneeSleeve, vc26::kKneeSleeves); break;
+	case ELookRow::ArmSleeve: Wrap(Look.armSleeve, vc26::kArmSleeves); break;
+	case ELookRow::Socks: Look.highSocks = !Look.highSocks; break;
+	case ELookRow::Tattoo: Wrap(Look.tattoo, vc26::kTattoos); break;
+	case ELookRow::Tape: Look.fingerTape = !Look.fingerTape; break;
+	default: break;
+	}
 }
 
 FString AVC26Arena::NameOf(vc26::Team Team, int32 Player) const
@@ -288,11 +443,27 @@ TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 		}
 		Items.Add({TEXT("Upgrade Skills"), EVC26MenuAction::OpenUpgrades});
 		Items.Add({TEXT("Career Record"), EVC26MenuAction::OpenRecord});
+		Items.Add({TEXT("Change Your Look"), EVC26MenuAction::OpenLook});
 		Items.Add({TEXT("Main Menu"), EVC26MenuAction::ToMainMenu});
 		break;
 	case EVC26Screen::Record:
 		Items.Add({TEXT("Back"), EVC26MenuAction::Back});
 		break;
+	case EVC26Screen::Look:
+	{
+		static const TCHAR* const Names[] = {
+			TEXT("Height"), TEXT("Weight"), TEXT("Arm Length"),
+			TEXT("Face"), TEXT("Nose"), TEXT("Jaw"), TEXT("Chin"), TEXT("Cheeks"), TEXT("Brow"), TEXT("Forehead"), TEXT("Lips"),
+			TEXT("Skin Tone"), TEXT("Hair"), TEXT("Hair Colour"), TEXT("Facial Hair"), TEXT("Headband"),
+			TEXT("Shoes"), TEXT("Knee Sleeves"), TEXT("Arm Sleeve"), TEXT("Socks"), TEXT("Tattoo"), TEXT("Finger Tape")};
+		for (int32 Row = bRestyling ? static_cast<int32>(ELookRow::Face) : 0; Row < static_cast<int32>(ELookRow::Count); ++Row)
+		{
+			Items.Add({Names[Row], EVC26MenuAction::LookRow, Row, LookRowText(static_cast<ELookRow>(Row))});
+		}
+		Items.Add({TEXT("Randomise"), EVC26MenuAction::LookRandom});
+		Items.Add({bRestyling ? TEXT("Done") : TEXT("Start Career"), EVC26MenuAction::LookDone});
+		break;
+	}
 	case EVC26Screen::Transfers:
 		if (Career.IsSet())
 		{
@@ -331,14 +502,7 @@ void AVC26Arena::ConfirmMenu()
 	switch (Screen)
 	{
 	case EVC26Screen::CreatePlayer:
-		// Keeps the previous career, in case this one was started by mistake.
-		if (bHasSave)
-		{
-			IFileManager::Get().Copy(*(SavePath() + TEXT(".bak")), *SavePath());
-		}
-		Career.Emplace(TypedName.TrimStartAndEnd().IsEmpty() ? std::string("The Rookie") : std::string(TCHAR_TO_UTF8(*TypedName.TrimStartAndEnd())), GetChosenArchetype(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
-		SaveCareer();
-		GoTo(EVC26Screen::Hub);
+		OpenLook(false);
 		return;
 	case EVC26Screen::Report:
 		if (!bReportFromCareer)
@@ -399,6 +563,40 @@ void AVC26Arena::ConfirmMenu()
 		GoTo(EVC26Screen::Report);
 		break;
 	case EVC26MenuAction::OpenRecord: GoTo(EVC26Screen::Record); break;
+	case EVC26MenuAction::OpenLook: OpenLook(true); break;
+	case EVC26MenuAction::LookRow: break;
+	case EVC26MenuAction::LookRandom:
+	{
+		// A new player gets a whole new body, and a returning one only a new style.
+		vc26::Appearance Fresh = vc26::makeAppearance(GetDraftPosition(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
+		if (bRestyling)
+		{
+			Fresh.heightCm = DraftLook.heightCm;
+			Fresh.massKg = DraftLook.massKg;
+			Fresh.arms = DraftLook.arms;
+		}
+		DraftLook = Fresh;
+		ShowLookPreview();
+		break;
+	}
+	case EVC26MenuAction::LookDone:
+		CloseLook();
+		if (bRestyling)
+		{
+			Career->restyle(DraftLook);
+		}
+		else
+		{
+			// Keeps the previous career, in case this one was started by mistake.
+			if (bHasSave)
+			{
+				IFileManager::Get().Copy(*(SavePath() + TEXT(".bak")), *SavePath());
+			}
+			Career.Emplace(TypedName.TrimStartAndEnd().IsEmpty() ? std::string("The Rookie") : std::string(TCHAR_TO_UTF8(*TypedName.TrimStartAndEnd())), GetChosenArchetype(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()), DraftLook);
+		}
+		SaveCareer();
+		GoTo(EVC26Screen::Hub);
+		break;
 	case EVC26MenuAction::SignOffer:
 		Career->startNextSeason(Item.Arg);
 		SaveCareer();
@@ -469,6 +667,16 @@ void AVC26Arena::UpdateMenus()
 			ChosenArchetype = (ChosenArchetype + 1) % vc26::kArchetypes;
 		}
 	}
+	if (Screen == EVC26Screen::Look)
+	{
+		const int32 Step = Pressed({EKeys::Left, EKeys::A, EKeys::Gamepad_DPad_Left}) ? -1 : Pressed({EKeys::Right, EKeys::D, EKeys::Gamepad_DPad_Right}) ? 1 : 0;
+		const TArray<FVC26MenuItem> Items = GetMenuItems();
+		if (Step != 0 && Items.IsValidIndex(MenuIndex) && Items[MenuIndex].Action == EVC26MenuAction::LookRow)
+		{
+			ChangeLookRow(static_cast<ELookRow>(Items[MenuIndex].Arg), Step);
+		}
+		ShowLookPreview();
+	}
 	if (Screen == EVC26Screen::Report && HasHighlights() && Pressed({EKeys::H, EKeys::Gamepad_FaceButton_Top}))
 	{
 		ReplayQueue = Highlights;
@@ -490,6 +698,11 @@ void AVC26Arena::UpdateMenus()
 		else if (Screen == EVC26Screen::CreatePlayer)
 		{
 			GoTo(EVC26Screen::MainMenu);
+		}
+		else if (Screen == EVC26Screen::Look)
+		{
+			CloseLook();
+			GoTo(bRestyling ? EVC26Screen::Hub : EVC26Screen::CreatePlayer);
 		}
 	}
 }
@@ -1077,11 +1290,16 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 		StartMatch(false, EVC26Mode::Beach);
 		break;
 	case 20: Shot(TEXT("13_beach")); StartBackgroundMatch(); GoTo(EVC26Screen::Match); break;
-	case 21: case 22: case 23: case 24: case 25: case 26: case 27: case 28: case 29:
+	case 21: case 22: case 23: case 24: case 25: case 26: case 27: case 28: case 29: case 30: case 31:
 	{
 		// Everyone holds a pose for a close look, with the sim frozen.
-		static const TCHAR* const Names[] = {TEXT("20_ready"), TEXT("21_pass"), TEXT("22_set"), TEXT("23_block"), TEXT("24_windup"), TEXT("25_swing"), TEXT("26_toss"), TEXT("27_cheer")};
-		static const EPose Poses[] = {EPose::Idle, EPose::Pass, EPose::Set, EPose::Block, EPose::AttackWindUp, EPose::AttackSwing, EPose::ServeToss, EPose::Celebrate};
+		static const TCHAR* const Names[] = {TEXT("20_ready"), TEXT("21_pass"), TEXT("22_set"), TEXT("23_block"), TEXT("24_windup"), TEXT("24b_draw"), TEXT("25_swing"), TEXT("26_hold"), TEXT("26b_toss"), TEXT("27_cheer")};
+		static const EPose Poses[] = {EPose::Idle, EPose::Pass, EPose::Set, EPose::Block, EPose::AttackWindUp, EPose::AttackDraw, EPose::AttackSwing, EPose::ServeHold, EPose::ServeToss, EPose::Celebrate};
+		if (Screen != EVC26Screen::Match)
+		{
+			StartBackgroundMatch();
+			GoTo(EVC26Screen::Match);
+		}
 		const int32 Index = TourStep - 23;
 		if (Index >= 0)
 		{
@@ -1089,11 +1307,13 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 		}
 		if (Index + 1 < UE_ARRAY_COUNT(Poses))
 		{
-			GalleryPose = static_cast<int32>(Poses[Index + 1]);
+			const EPose Next = Poses[Index + 1];
+			GalleryPose = static_cast<int32>(Next);
+			GalleryAim = Next == EPose::AttackDraw || Next == EPose::AttackSwing || Next == EPose::Block ? 200.f : 105.f;
 		}
 		break;
 	}
-	case 30:
+	case 32:
 		GalleryPose = -1;
 		Career.Emplace(std::string("The Rookie"), vc26::Archetype::PowerSpiker, 7u);
 		while (Career->stage() != vc26::CareerStage::SeasonOver)
@@ -1105,12 +1325,35 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 		}
 		GoTo(EVC26Screen::Transfers);
 		break;
-	case 31: Shot(TEXT("30_transfers")); break;
-	case 32: GoTo(EVC26Screen::Record); break;
-	case 33: Shot(TEXT("31_record")); break;
-	case 34: Report = Career->sitOut(); GoTo(EVC26Screen::Report); break;
-	case 35: Shot(TEXT("32_sat_out")); break;
-	case 36: break;  // a shot is saved on the next frame
+	case 33: Shot(TEXT("30_transfers")); break;
+	case 34: GoTo(EVC26Screen::Record); break;
+	case 35: Shot(TEXT("31_record")); break;
+	case 36: Report = Career->sitOut(); GoTo(EVC26Screen::Report); break;
+	case 37: Shot(TEXT("32_sat_out")); StartBackgroundMatch(); break;
+	case 38: OpenLook(false); break;
+	case 39: Shot(TEXT("40_look_body")); MenuIndex = static_cast<int32>(ELookRow::Nose); break;
+	case 40: case 41: case 42: case 43: case 44: case 45: case 46: case 47:
+	{
+		// Faces from a squad, then the same again with a lean and a heavy build.
+		const int32 Index = TourStep - 41;
+		if (Index >= 0)
+		{
+			Shot(*FString::Printf(TEXT("41_face_%d"), Index));
+		}
+		DraftLook = vc26::makeTeamAppearance("HOME", Index + 2);
+		DraftLook.hair = static_cast<vc26::HairStyle>((Index + 1) % vc26::kHairStyles);
+		DraftLook.facialHair = static_cast<vc26::FacialHair>((Index + 1) % vc26::kFacialHairs);
+		break;
+	}
+	case 48:
+		MenuIndex = 0;
+		DraftLook.heightCm = 214;
+		DraftLook.massKg = 88;
+		break;
+	case 49: Shot(TEXT("42_body_tall_lean")); break;
+	case 50: DraftLook.heightCm = 176; DraftLook.massKg = 92; break;
+	case 51: Shot(TEXT("43_body_short_heavy")); break;
+	case 52: CloseLook(); GoTo(EVC26Screen::MainMenu); break;
 	default: FPlatformMisc::RequestExit(false, TEXT("VC26 screenshot tour")); break;
 	}
 }

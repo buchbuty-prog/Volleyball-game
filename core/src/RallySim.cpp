@@ -319,6 +319,10 @@ void RallySim::step(float dt, const SimInput& input, const SimInput& awayInput) 
     movePlayers(dt, inputs);
 }
 
+float RallySim::tossProgress() const {
+    return tossing_ ? std::min(tossTime_ / kTossTime, 1.f) : 0.f;
+}
+
 void RallySim::updatePreServe(float dt, const SimInput& input, bool pressed) {
     timer_ += dt;
     SimPlayer& server = players_[serverIndex()];

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "vc26/Appearance.h"
 #include "vc26/RallySim.h"
 
 namespace vc26 {
@@ -107,12 +108,17 @@ public:
     static constexpr int kRounds = kTeams - 1;
 
     Career(std::string name, Archetype archetype, std::uint32_t seed);
+    // A created body: its height moves the starting skills, for good and bad.
+    Career(std::string name, Archetype archetype, std::uint32_t seed, const Appearance& look);
 
     static SkillRatings startingSkills(Archetype archetype);
 
     const std::string& name() const { return name_; }
     Archetype archetype() const { return archetype_; }
     const SkillRatings& skills() const { return skills_; }
+    const Appearance& look() const { return look_; }
+    void restyle(const Appearance& look);  // hair and kit can change later, the body can't
+    Position position() const { return positionOfShirt(lockedPlayer() + 1); }
     int overall() const;
     int skillPoints() const { return skillPoints_; }
     Tier tier() const { return tier_; }
@@ -187,6 +193,7 @@ private:
 
     std::string name_;
     Archetype archetype_;
+    Appearance look_;
     std::uint32_t rng_;
     SkillRatings skills_{};
     int skillPoints_ = 0;

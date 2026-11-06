@@ -42,7 +42,8 @@ enum class EVC26Screen : uint8
 	SeasonEnd,
 	Story,
 	Transfers,
-	Record
+	Record,
+	Look
 };
 
 enum class EVC26Mode : uint8
@@ -68,7 +69,11 @@ enum class EVC26MenuAction : uint8
 	StoryChoice,  // Arg is the option
 	SitOut,
 	OpenRecord,
-	SignOffer  // Arg is the offer, or -1 to stay
+	SignOffer,  // Arg is the offer, or -1 to stay
+	OpenLook,
+	LookRow,   // Arg is the row, changed with Left and Right
+	LookRandom,
+	LookDone
 };
 
 struct FVC26MenuItem
@@ -76,6 +81,7 @@ struct FVC26MenuItem
 	FString Label;
 	EVC26MenuAction Action;
 	int32 Arg = 0;
+	FString Value;  // shown on the right of the row
 };
 
 UCLASS()
@@ -95,6 +101,9 @@ public:
 	float GetCommentaryTimeLeft() const { return CommentaryTimeLeft; }
 	FString PlayerLabel(int32 Player) const;  // "#3 Okoro"
 	const FString& GetTypedName() const { return TypedName; }
+	const vc26::Appearance& GetDraftLook() const { return DraftLook; }
+	vc26::Position GetDraftPosition() const;
+	bool IsCreatingLook() const { return !bRestyling; }
 	float GetBannerTimeLeft() const { return BannerTimeLeft; }
 	const TCHAR* GetDifficultyName() const;
 	const vc26::TouchControls* GetTouch() const { return bUseTouch ? &Touch : nullptr; }
@@ -115,11 +124,20 @@ public:
 	const FString& GetAwayName() const { return AwayName; }
 
 private:
-	enum class EPose : uint8 { Idle, Pass, Set, AttackWindUp, AttackSwing, Block, ServeToss, Dive, Celebrate };
+	enum class EPose : uint8 { Idle, Pass, Set, AttackWindUp, AttackDraw, AttackSwing, Block, ServeHold, ServeToss, Dive, Celebrate };
 
-	// What a rigged athlete is playing underneath. Spike starts early for a wind-up,
-	// Swing late for a hit with none. Passes, sets and blocks are built on Idle.
-	enum class EClip : uint8 { Idle, Run, Spike, Swing, Dive, Samba, Count };
+	// What a rigged athlete is playing underneath. Every touch is built on Idle.
+	enum class EClip : uint8 { Idle, Run, Dive, Samba, Count };
+
+	// The rows of the look screen. Body rows only show for a new player.
+	enum class ELookRow : uint8
+	{
+		Height, Mass, Arms,
+		Face, Nose, Jaw, Chin, Cheeks, Brow, Forehead, Lips,
+		Skin, Hair, HairColour, FacialHair, Headband,
+		Shoes, Knees, ArmSleeve, Socks, Tattoo, Tape,
+		Count
+	};
 
 	// Per-player animation state. The shapes themselves live in Parts.
 	struct FFigure
@@ -160,6 +178,12 @@ private:
 	void HandleEvents();
 	void SetBanner(const FString& Text);
 	void SetRosters();
+	vc26::Appearance LookOf(int32 Player) const;
+	void OpenLook(bool bRestyle);
+	void CloseLook();
+	void ChangeLookRow(ELookRow Row, int32 Step);
+	FString LookRowText(ELookRow Row) const;
+	void ShowLookPreview();
 	void CallPoint(const vc26::SimEvent& Event);
 	FString NameOf(vc26::Team Team, int32 Player) const;
 	void SetDifficulty(int32 Level);
@@ -195,6 +219,7 @@ private:
 	void BuildCrowd();
 	void BuildPlayers();
 	bool BuildAthletes();
+	void ApplyLook(int32 Player, const vc26::Appearance& Look);
 	void AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward, const FVector& MoveDir, float Speed, float DeltaSeconds);
 	void AnimateReferee(float DeltaSeconds);
 	void BuildBall();
@@ -342,6 +367,10 @@ private:
 	int32 GalleryPose = -1;
 	int32 GalleryPlayer = 0;
 	FVector GalleryView = FVector(230.f, -230.f, 140.f);
+	float GalleryAim = 105.f;  // how high the camera looks on the player
+	vc26::Appearance DraftLook;
+	int32 DraftFace = 0;
+	bool bRestyling = false;   // false: choosing a new player's whole body
 	float BallSpin = 0.f;
 	float CrowdExcitement = 0.f;
 	bool bCrowdSettled = true;

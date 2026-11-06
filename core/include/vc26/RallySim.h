@@ -139,6 +139,8 @@ public:
     bool humanServing() const { return phase_ == RallyPhase::PreServe && isHumanPlayer(serverIndex()); }
     bool humanToPlay() const { return pending_.active && isHumanPlayer(pending_.player); }
     bool serveCharging() const { return charging_; }
+    bool serveTossing() const { return tossing_; }
+    float tossProgress() const;  // 0 as the ball leaves the hand, 1 at contact
     float serveGauge() const;  // 0..1, sweeps while charging
     float serveAim() const { return serveAim_; }
     Team pointWinner() const { return pointWinner_; }

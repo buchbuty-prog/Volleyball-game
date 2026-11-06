@@ -20,7 +20,9 @@ Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run 
 
 Rigged athletes come from Mixamo files, which stay out of git because the license doesn't allow sharing them. Put the downloads in `game/Content/Mixamo` and run `game/Tools/ImportAthletes.bat`. Without them the game uses its shape-built players. Set `VC26_MATERIALS_ONLY=1` first to rebuild only the kit and hair materials.
 
-Mixamo has no volleyball animations, so `VC26AthleteAnim` plays a clip and builds the volleyball on top of it: crossfades, a stance with planted feet, the forearm platform, overhead set, block arms, a hand that meets the ball and a head that follows it. The kit material turns the one white football kit into each team's, with short sleeves, knee pads and each player's number, skin and hair.
+Mixamo has no volleyball animations, so `VC26AthleteAnim` plays a clip and builds the volleyball on top of it: crossfades, a stance with planted feet, the forearm platform, overhead set, block arms, a spike in phases (arms back, bow and arrow, whip, follow-through), a serve from the held ball through the toss, and a head that follows the ball.
+
+One mesh plays every player. `core/src/Appearance.cpp` draws each body from the real height and weight spread for the position, using Palao, Manzanares and Valades (2014), a study of 1,440 men at the Olympics and World Championships from 2000 to 2012. Faces are invented. Bones set limb length and shoulder width, and the kit material reshapes faces and muscle per vertex and paints hair styles, facial hair, shoes, sleeves, tape and tattoos.
 
 | Input | Action |
 |---|---|
