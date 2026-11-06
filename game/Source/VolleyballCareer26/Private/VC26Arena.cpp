@@ -117,7 +117,54 @@ void AVC26Arena::StartBackgroundMatch()
 	bCareerMatch = false;
 	HomeName = TEXT("HOME");
 	AwayName = TEXT("AWAY");
+	SetRosters();
 	Accumulator = 0.f;
+}
+
+void AVC26Arena::SetRosters()
+{
+	HomeRoster = vc26::makeRoster(TCHAR_TO_UTF8(*HomeName));
+	AwayRoster = vc26::makeRoster(TCHAR_TO_UTF8(*(AwayName + TEXT(" away"))));
+	if (bCareerMatch && Career.IsSet())
+	{
+		HomeRoster[Sim->players()[Career->lockedPlayer()].id - 1] = Career->name();
+	}
+	PointRun.reset();
+	LastTouch[0] = LastTouch[1] = -1;
+	Commentary.Reset();
+	CommentaryTimeLeft = 0.f;
+}
+
+FString AVC26Arena::NameOf(vc26::Team Team, int32 Player) const
+{
+	if (Player < 0)
+	{
+		return FString();
+	}
+	const vc26::Roster& Roster = Team == vc26::Team::Home ? HomeRoster : AwayRoster;
+	return UTF8_TO_TCHAR(Roster[FMath::Clamp(Sim->players()[Player].id - 1, 0, vc26::kRosterSize - 1)].c_str());
+}
+
+FString AVC26Arena::PlayerLabel(int32 Player) const
+{
+	const vc26::SimPlayer& Body = Sim->players()[Player];
+	return FString::Printf(TEXT("#%d %s"), Body.id, *NameOf(Body.team, Player));
+}
+
+void AVC26Arena::CallPoint(const vc26::SimEvent& Event)
+{
+	const vc26::Team Loser = Event.team == vc26::Team::Home ? vc26::Team::Away : vc26::Team::Home;
+	vc26::PointCall Call;
+	Call.reason = Event.reason;
+	Call.scorer = TCHAR_TO_UTF8(*NameOf(Event.team, LastTouch[static_cast<int32>(Event.team)]));
+	Call.blunder = TCHAR_TO_UTF8(*NameOf(Loser, LastTouch[static_cast<int32>(Loser)]));
+	Call.team = TCHAR_TO_UTF8(*(Event.team == vc26::Team::Home ? HomeName : AwayName));
+	Call.contacts = Sim->contactsThisRally();
+	Call.run = PointRun.add(Event.team);
+	Call.setOnTheLine = Event.clutch;
+	Commentary = UTF8_TO_TCHAR(vc26::callPoint(Call, CallCount++).c_str());
+	CommentaryTimeLeft = 4.f;
+	LastTouch[0] = LastTouch[1] = -1;
 }
 
 void AVC26Arena::StartMatch(bool bCareer, EVC26Mode Mode)
@@ -155,13 +202,14 @@ void AVC26Arena::StartMatch(bool bCareer, EVC26Mode Mode)
 	bCouch = Mode == EVC26Mode::Couch;
 
 	Sim = MakeUnique<vc26::RallySim>(Config);
+	bCareerMatch = bCareer;
+	SetRosters();
 	Stats = {};
 	LockedPlayer = Config.lockedPlayer;
 	Highlights.Reset();
 	Snapshot.Reset();
 	InputLog.Reset();
 	ReplayCountdown = -1.f;
-	bCareerMatch = bCareer;
 	Accumulator = 0.f;
 	bCameraReady = false;
 	GoTo(EVC26Screen::Match);
@@ -169,16 +217,25 @@ void AVC26Arena::StartMatch(bool bCareer, EVC26Mode Mode)
 
 void AVC26Arena::FinishMatch()
 {
-	if (!bCareerMatch || !Career.IsSet())
-	{
-		GoTo(EVC26Screen::MainMenu);
-		StartBackgroundMatch();
-		return;
-	}
-
 	const vc26::MatchScore& Score = Sim->score();
-	Report = Career->recordMatch(Score.sets(vc26::Team::Home), Score.sets(vc26::Team::Away), Stats);
-	SaveCareer();
+	const int32 SetsFor = Score.sets(vc26::Team::Home);
+	const int32 SetsAgainst = Score.sets(vc26::Team::Away);
+	if (bCareerMatch && Career.IsSet())
+	{
+		Report = Career->recordMatch(SetsFor, SetsAgainst, Stats);
+		SaveCareer();
+	}
+	else
+	{
+		// A friendly gets the same report, with nothing to earn.
+		Report = {};
+		Report.won = SetsFor > SetsAgainst;
+		Report.setsFor = SetsFor;
+		Report.setsAgainst = SetsAgainst;
+		Report.rating = vc26::matchRating(Stats, Report.won);
+		Report.stats = Stats;
+	}
+	bReportFromCareer = bCareerMatch;
 	GoTo(EVC26Screen::Report);
 	StartBackgroundMatch();
 }
@@ -236,7 +293,8 @@ TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 			{
 				Items.Add({FString::Printf(TEXT("Sign for %s"), UTF8_TO_TCHAR(Offers[i].club.c_str())), EVC26MenuAction::SignOffer, i});
 			}
-			Items.Add({Career->promoted() ? TEXT("Take the move you earned") : TEXT("Stay with your club"), EVC26MenuAction::SignOffer, -1});
+			const FString Club = UTF8_TO_TCHAR(Career->nextClub().c_str());
+			Items.Add({(Career->promoted() ? TEXT("Join ") : TEXT("Stay with ")) + Club, EVC26MenuAction::SignOffer, -1});
 		}
 		break;
 	case EVC26Screen::Upgrades:
@@ -270,11 +328,16 @@ void AVC26Arena::ConfirmMenu()
 		{
 			IFileManager::Get().Copy(*(SavePath() + TEXT(".bak")), *SavePath());
 		}
-		Career.Emplace(std::string("The Rookie"), GetChosenArchetype(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
+		Career.Emplace(TypedName.TrimStartAndEnd().IsEmpty() ? std::string("The Rookie") : std::string(TCHAR_TO_UTF8(*TypedName.TrimStartAndEnd())), GetChosenArchetype(), static_cast<std::uint32_t>(FDateTime::Now().GetTicks()));
 		SaveCareer();
 		GoTo(EVC26Screen::Hub);
 		return;
 	case EVC26Screen::Report:
+		if (!bReportFromCareer)
+		{
+			GoTo(EVC26Screen::MainMenu);
+			return;
+		}
 		GoTo(Career->pendingStory() ? EVC26Screen::Story : Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
 		return;
 	case EVC26Screen::SeasonEnd:
@@ -323,6 +386,7 @@ void AVC26Arena::ConfirmMenu()
 	case EVC26MenuAction::SitOut:
 		Report = Career->sitOut();
 		SaveCareer();
+		bReportFromCareer = true;
 		Highlights.Reset();
 		GoTo(EVC26Screen::Report);
 		break;
@@ -370,11 +434,29 @@ void AVC26Arena::UpdateMenus()
 	}
 	if (Screen == EVC26Screen::CreatePlayer)
 	{
-		if (Pressed({EKeys::Left, EKeys::A, EKeys::Gamepad_DPad_Left}))
+		// Letters spell the name, so only the arrows change the position here.
+		constexpr int32 MaxNameLength = 18;
+		for (TCHAR Letter = TEXT('A'); Letter <= TEXT('Z'); ++Letter)
+		{
+			if (Player->WasInputKeyJustPressed(FKey(*FString::Chr(Letter))) && TypedName.Len() < MaxNameLength)
+			{
+				const bool bStartOfWord = TypedName.IsEmpty() || TypedName.EndsWith(TEXT(" "));
+				TypedName.AppendChar(bStartOfWord ? Letter : FChar::ToLower(Letter));
+			}
+		}
+		if (Pressed({EKeys::SpaceBar}) && !TypedName.IsEmpty() && !TypedName.EndsWith(TEXT(" ")) && TypedName.Len() < MaxNameLength)
+		{
+			TypedName.AppendChar(TEXT(' '));
+		}
+		if (Pressed({EKeys::BackSpace}))
+		{
+			TypedName.LeftChopInline(1);
+		}
+		if (Pressed({EKeys::Left, EKeys::Gamepad_DPad_Left}))
 		{
 			ChosenArchetype = (ChosenArchetype + vc26::kArchetypes - 1) % vc26::kArchetypes;
 		}
-		if (Pressed({EKeys::Right, EKeys::D, EKeys::Gamepad_DPad_Right}))
+		if (Pressed({EKeys::Right, EKeys::Gamepad_DPad_Right}))
 		{
 			ChosenArchetype = (ChosenArchetype + 1) % vc26::kArchetypes;
 		}
@@ -387,7 +469,7 @@ void AVC26Arena::UpdateMenus()
 		Screen = EVC26Screen::Match;
 		PlayNextClip();
 	}
-	else if (Pressed({EKeys::Enter, EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom}))
+	else if (Pressed({EKeys::Enter, EKeys::Gamepad_FaceButton_Bottom}) || (Screen != EVC26Screen::CreatePlayer && Pressed({EKeys::SpaceBar})))
 	{
 		ConfirmMenu();
 	}
@@ -630,6 +712,7 @@ void AVC26Arena::Tick(float DeltaSeconds)
 	UpdateCamera(DeltaSeconds);
 	Sounds.Tick(DeltaSeconds);
 	BannerTimeLeft = FMath::Max(BannerTimeLeft - DeltaSeconds, 0.f);
+	CommentaryTimeLeft = FMath::Max(CommentaryTimeLeft - DeltaSeconds, 0.f);
 
 	if (!ShotDir.IsEmpty())
 	{
@@ -804,6 +887,7 @@ void AVC26Arena::HandleEvents()
 				break;
 			}
 			bTakeSnapshot = bTakeSnapshot || Event.kind == vc26::ContactKind::Serve || Event.kind == vc26::ContactKind::Set;
+			LastTouch[static_cast<int32>(Event.team)] = Event.player;
 			FFigure& Figure = Figures[Event.player];
 			Figure.Swing = Swing;
 			Figure.SwingLeft = 0.28f;
@@ -853,6 +937,10 @@ void AVC26Arena::HandleEvents()
 			// Long rallies get the bigger reaction (GDD 4).
 			Sounds.Play(this, EVC26Sound::Cheer, 0.25f + 0.5f * FMath::Min(Sim->contactsThisRally() / 12.f, 1.f));
 			SetBanner(FString::Printf(TEXT("%s  %s POINT"), ReasonText(Event.reason), Event.team == vc26::Team::Home ? *HomeName.ToUpper() : *AwayName.ToUpper()));
+			if (bLive)
+			{
+				CallPoint(Event);
+			}
 
 			const vc26::MatchScore& Score = Sim->score();
 			UE_LOG(LogVC26, Log, TEXT("Point: %s %s | contacts %d | set %d | %d-%d"), Event.team == vc26::Team::Home ? TEXT("Home") : TEXT("Away"),
@@ -887,6 +975,12 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 		TourSeconds = 0.f;
 		TourSlowest = 0.f;
 	};
+
+	if (!bCommentaryShot && CommentaryTimeLeft > 3.f && Screen == EVC26Screen::Match && !IsReplaying() && Sim->humanHome())
+	{
+		bCommentaryShot = true;
+		Shot(TEXT("14_commentary"));
+	}
 
 	// The last steps wait for a moment in a live match, with a time limit.
 	if (TourStep >= 16 && TourStep <= 18)

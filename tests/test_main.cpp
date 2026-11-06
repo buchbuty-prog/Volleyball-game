@@ -7,6 +7,7 @@
 
 #include "vc26/Ball.h"
 #include "vc26/Career.h"
+#include "vc26/Commentary.h"
 #include "vc26/MatchScore.h"
 #include "vc26/RallySim.h"
 #include "vc26/RoleFit.h"
@@ -1425,6 +1426,66 @@ TEST(transfers_and_history_survive_a_save) {
     REQUIRE(again.has_value());
     CHECK(again->myTeam().name == moved.myTeam().name);
     CHECK(again->save() == moved.save());
+}
+
+// --- Broadcast --------------------------------------------------------------
+
+TEST(a_team_keeps_its_names_and_no_name_repeats) {
+    const Roster a = makeRoster("Harbor City VC");
+    CHECK(a == makeRoster("Harbor City VC"));
+    CHECK(a != makeRoster("Iron Bay Spikers"));
+    for (int i = 0; i < kRosterSize; ++i) {
+        CHECK(!a[static_cast<std::size_t>(i)].empty());
+        for (int j = i + 1; j < kRosterSize; ++j) CHECK(a[static_cast<std::size_t>(i)] != a[static_cast<std::size_t>(j)]);
+    }
+}
+
+TEST(every_call_fills_in_its_names) {
+    const PointReason reasons[] = {PointReason::Ace, PointReason::Kill, PointReason::BallDown, PointReason::Out,
+                                   PointReason::Antenna, PointReason::Block, PointReason::NetTouch};
+    for (const PointReason reason : reasons) {
+        for (std::uint32_t pick = 0; pick < 12; ++pick) {
+            PointCall call;
+            call.reason = reason;
+            call.scorer = "Sato";
+            call.blunder = "Varga";
+            call.team = "Westbrook";
+            call.contacts = 14;
+            call.run = 5;
+            const std::string line = callPoint(call, pick);
+            CHECK(!line.empty());
+            CHECK(line.find('{') == std::string::npos);
+
+            call.scorer.clear();
+            call.blunder.clear();
+            const std::string nameless = callPoint(call, pick);
+            CHECK(nameless.find('{') == std::string::npos);
+            CHECK(nameless.find("  ") == std::string::npos);
+        }
+    }
+}
+
+TEST(long_rallies_and_runs_get_a_mention) {
+    PointCall call;
+    call.scorer = "Sato";
+    call.team = "Westbrook";
+    call.contacts = 13;
+    CHECK(callPoint(call, 0).find("13 touches") != std::string::npos);
+    call.contacts = 4;
+    call.run = 5;
+    CHECK(callPoint(call, 0).find("5 in a row") != std::string::npos);
+    call.run = 2;
+    CHECK(callPoint(call, 0).find("in a row") == std::string::npos);
+}
+
+TEST(a_run_ends_when_the_other_team_scores) {
+    PointRun run;
+    CHECK(run.add(Team::Home) == 1);
+    CHECK(run.add(Team::Home) == 2);
+    CHECK(run.add(Team::Away) == 1);
+    CHECK(run.add(Team::Home) == 1);
+    run.reset();
+    CHECK(run.add(Team::Away) == 1);
 }
 
 int main() {

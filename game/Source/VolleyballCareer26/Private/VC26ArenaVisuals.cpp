@@ -71,6 +71,7 @@ namespace
 	constexpr float DiveTravel = 0.3f;     // the share of the dive animation's own travel that is kept
 	constexpr float RunClipSpeed = 533.f;  // cm/s the run clip covers, so the feet match the floor
 	constexpr float SwingSeconds = 0.28f;  // how long a touch is held after contact
+	constexpr float LandSeconds = 0.3f;
 
 	// Where the joint sits between two ends of a limb with equal halves.
 	FVector JointBetween(const FVector& Start, FVector& End, float HalfLength, const FVector& BendTowards)
@@ -626,10 +627,26 @@ void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, c
 	const float Air = FMath::Clamp(Feet.Z / 35.f, 0.f, 1.f);
 	Goal.Tuck = Air * (Pose == EPose::Block ? 0.25f : 0.8f);
 
+	// Knees soak up the landing.
+	const bool bAirborne = Feet.Z > 6.f;
+	if (Figure.bAirborne && !bAirborne)
+	{
+		Figure.LandLeft = LandSeconds;
+	}
+	Figure.bAirborne = bAirborne;
+	Figure.LandLeft = FMath::Max(Figure.LandLeft - DeltaSeconds, 0.f);
+	const float Landing = Figure.LandLeft / LandSeconds;
+	Goal.Crouch += 24.f * Landing;
+	Goal.Lean += 12.f * Landing;
+
 	const vc26::PendingContact& Pending = Sim->pending();
 	if (Pending.active && Pending.player == Player)
 	{
 		Figure.Reach = SimToWorld(Pending.point);
+	}
+	else if (Pose == EPose::Block && Sim->block().active)
+	{
+		Figure.Reach = SimToWorld(Sim->block().attackPoint);
 	}
 	else if (Pose != EPose::AttackSwing)
 	{

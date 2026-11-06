@@ -1,6 +1,6 @@
 # Volleyball Career 26
 
-Mobile 3rd-person volleyball sim for Android. The full design is in [docs/GDD.md](docs/GDD.md).
+3rd-person volleyball sim, built for PC first, with phone controls already in the code. The full design is in [docs/GDD.md](docs/GDD.md).
 
 ## Repository layout
 
@@ -18,7 +18,9 @@ Mobile 3rd-person volleyball sim for Android. The full design is in [docs/GDD.md
 
 Build the project once ([docs/SETUP-UNREAL.md](docs/SETUP-UNREAL.md)), then run `game/Play.bat`.
 
-Rigged athletes come from Mixamo files, which stay out of git because the license doesn't allow sharing them. Put the downloads in `game/Content/Mixamo` and run `game/Tools/ImportAthletes.bat`. Without them the game uses its shape-built players.
+Rigged athletes come from Mixamo files, which stay out of git because the license doesn't allow sharing them. Put the downloads in `game/Content/Mixamo` and run `game/Tools/ImportAthletes.bat`. Without them the game uses its shape-built players. Set `VC26_MATERIALS_ONLY=1` first to rebuild only the kit and hair materials.
+
+Mixamo has no volleyball animations, so `VC26AthleteAnim` plays a clip and builds the volleyball on top of it: crossfades, a stance with planted feet, the forearm platform, overhead set, block arms, a hand that meets the ball and a head that follows it. The kit material turns the one white football kit into each team's, with short sleeves, knee pads and each player's number, skin and hair.
 
 | Input | Action |
 |---|---|
@@ -31,7 +33,7 @@ Rigged athletes come from Mixamo files, which stay out of git because the licens
 
 You control whichever Home player the ball is going to, or your nearest front-row blocker when the opponent attacks. Sets and attacks position the player for you.
 
-The main menu has **New Career**, **Continue Career**, **Quick Match**, **Beach 2v2** and **Couch Match**. In a career you pick an archetype and play only that player, in an eight-team league and a final. You spend skill points, face a rival, answer press and coaching choices, and climb from the University Circuit to the World Stage. Press Esc to leave a match without it counting. Careers save to `game/Saved/VC26Career.sav`.
+The main menu has **New Career**, **Continue Career**, **Quick Match**, **Beach 2v2** and **Couch Match**. In a career you pick an archetype and play only that player, in an eight-team league and a final. You spend skill points, face a rival, answer press and coaching choices, and climb from the University Circuit to the World Stage. Injuries and a coach who loses trust can keep you out of matches, good seasons bring transfer offers, and every season goes into your Career Record. Press Esc to leave a match without it counting. Careers save to `game/Saved/VC26Career.sav`.
 
 ## Build & test
 

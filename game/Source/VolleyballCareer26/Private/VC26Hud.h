@@ -36,7 +36,7 @@ private:
 	void DrawHub(const AVC26Arena& Arena, const vc26::Career& Career);
 	void DrawTable(const vc26::Career& Career, float X, float Y);
 	void DrawUpgrades(const AVC26Arena& Arena, const vc26::Career& Career);
-	void DrawReport(const AVC26Arena& Arena, const vc26::Career& Career);
+	void DrawReport(const AVC26Arena& Arena, const vc26::Career* Career);  // no career for a friendly
 	void DrawSeasonEnd(const vc26::Career& Career);
 	void DrawStory(const AVC26Arena& Arena, const vc26::Career& Career);
 	void DrawTransfers(const AVC26Arena& Arena, const vc26::Career& Career);

@@ -164,6 +164,7 @@ public:
     // Offers wait at SeasonOver. Pass an index to sign, or -1 to stay.
     const std::vector<TransferOffer>& offers() const { return offers_; }
     void startNextSeason(int offer = -1);
+    std::string nextClub() const;  // who you play for next season without signing
 
     const std::vector<SeasonRecord>& history() const { return history_; }
     int careerKills() const { return kills_; }

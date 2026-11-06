@@ -20,6 +20,8 @@ namespace
 	constexpr float MinHipHeight = 32.f;  // the dive ends below the floor without this
 	constexpr float MaxLook = 75.f;       // degrees the head turns from the chest
 	constexpr float MaxTwist = 70.f;      // degrees the shoulders turn from the hips
+	constexpr float MaxHandShift = 22.f;  // cm the hands move from a set's home position
+	constexpr float MaxBlockSlide = 28.f; // cm the arms lean along the net
 
 	const FVector Up(0.f, 0.f, 1.f);
 	const FVector Ahead(0.f, 1.f, 0.f);
@@ -135,8 +137,14 @@ void FVC26AthleteProxy::SolveArm(FCompactPose& Pose, bool bLeft)
 	const FVector Low = FVector(ToReach.X, FMath::Max(ToReach.Y, 0.55f), FMath::Clamp(ToReach.Z, -0.8f, -0.38f)).GetSafeNormal();
 	Add(Drive.Platform, Shoulders + Low * 75.f + FVector(1.5f * Out, 0.f, 0.f), FVector(Out, 0.f, -0.5f));
 
-	Add(Drive.Overhead, FromChest(9.f, 30.f, 40.f), FVector(Out, -0.1f, -0.4f));
-	Add(Drive.Block, FromChest(19.f, 26.f, 95.f), FVector(Out, -0.3f, 0.f));
+	// Hands go to meet the ball if it's close, and hold their shape around it.
+	const FVector SetHome = FromChest(0.f, 30.f, 40.f);
+	const FVector ToBall = (Drive.Reach - SetHome).GetClampedToMaxSize(MaxHandShift);
+	Add(Drive.Overhead, FromChest(9.f, 30.f, 40.f) + ToBall, FVector(Out, -0.1f, -0.4f));
+
+	// A block shifts along the net to where the attack is coming from.
+	const float Slide = FMath::Clamp(Drive.Reach.X, -MaxBlockSlide, MaxBlockSlide);
+	Add(Drive.Block, FromChest(19.f, 26.f, 95.f) + FVector(Slide, 0.f, 0.f), FVector(Out, -0.3f, 0.f));
 
 	if (bLeft)
 	{

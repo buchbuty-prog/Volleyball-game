@@ -427,6 +427,11 @@ void Career::finishSeason() {
     }
 }
 
+std::string Career::nextClub() const {
+    if (promoted_) return kMyTeam[static_cast<int>(tier_) + 1];
+    return myTeam().name;
+}
+
 void Career::startNextSeason(int offer) {
     const bool signing = offer >= 0 && offer < static_cast<int>(offers_.size());
     const bool stayedLoyal = !signing && !offers_.empty();

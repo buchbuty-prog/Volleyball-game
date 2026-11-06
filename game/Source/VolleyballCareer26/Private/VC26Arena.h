@@ -10,6 +10,7 @@
 #include "VC26AthleteAnim.h"
 #include "VC26Sounds.h"
 #include "vc26/Career.h"
+#include "vc26/Commentary.h"
 #include "vc26/RallySim.h"
 #include "vc26/TouchControls.h"
 #include "VC26Arena.generated.h"
@@ -90,6 +91,10 @@ public:
 
 	const vc26::RallySim* GetSim() const { return Sim.Get(); }
 	const FString& GetBanner() const { return Banner; }
+	const FString& GetCommentary() const { return Commentary; }
+	float GetCommentaryTimeLeft() const { return CommentaryTimeLeft; }
+	FString PlayerLabel(int32 Player) const;  // "#3 Okoro"
+	const FString& GetTypedName() const { return TypedName; }
 	float GetBannerTimeLeft() const { return BannerTimeLeft; }
 	const TCHAR* GetDifficultyName() const;
 	const vc26::TouchControls* GetTouch() const { return bUseTouch ? &Touch : nullptr; }
@@ -104,6 +109,7 @@ public:
 	const vc26::MatchReport& GetReport() const { return Report; }
 	vc26::Archetype GetChosenArchetype() const { return static_cast<vc26::Archetype>(ChosenArchetype); }
 	bool IsCareerMatch() const { return bCareerMatch; }
+	bool IsReportFromCareer() const { return bReportFromCareer; }
 	bool IsCouchMatch() const { return bCouch; }
 	const FString& GetHomeName() const { return HomeName; }
 	const FString& GetAwayName() const { return AwayName; }
@@ -132,6 +138,8 @@ private:
 		float FadeTime = 0.f;
 		FVector Body = FVector::ForwardVector;  // the way the hips point
 		FVector Reach = FVector::ZeroVector;    // where the ball was last met
+		float LandLeft = 0.f;                   // knees soak up a landing
+		bool bAirborne = false;
 		FVC26AthleteDrive Drive;
 		bool bShown = true;
 	};
@@ -151,6 +159,9 @@ private:
 	vc26::SimInput ReadAwayInput() const;
 	void HandleEvents();
 	void SetBanner(const FString& Text);
+	void SetRosters();
+	void CallPoint(const vc26::SimEvent& Event);
+	FString NameOf(vc26::Team Team, int32 Player) const;
 	void SetDifficulty(int32 Level);
 	void RunScreenshotTour(float DeltaSeconds);
 
@@ -306,6 +317,17 @@ private:
 	float SlowMoLeft = 0.f;
 	float AnimationRate = 1.f;  // how fast the players move next to real time
 
+	// Broadcast.
+	FString Commentary;
+	float CommentaryTimeLeft = 0.f;
+	vc26::Roster HomeRoster;
+	vc26::Roster AwayRoster;
+	vc26::PointRun PointRun;
+	int32 LastTouch[2] = {-1, -1};  // each team's last player to touch the ball
+	uint32 CallCount = 0;
+	FString TypedName;
+	bool bReportFromCareer = false;
+
 	// The screenshot tour can freeze the match and pose everyone.
 	int32 GalleryPose = -1;
 	int32 GalleryPlayer = 0;
@@ -323,6 +345,7 @@ private:
 	FString ShotDir;
 	float TourTime = 0.f;
 	int32 TourFrames = 0;
+	bool bCommentaryShot = false;
 	float TourSeconds = 0.f;
 	float TourSlowest = 0.f;
 	int32 TourStep = 0;
