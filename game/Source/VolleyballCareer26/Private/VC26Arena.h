@@ -39,7 +39,9 @@ enum class EVC26Screen : uint8
 	Match,
 	Report,
 	SeasonEnd,
-	Story
+	Story,
+	Transfers,
+	Record
 };
 
 enum class EVC26Mode : uint8
@@ -62,7 +64,10 @@ enum class EVC26MenuAction : uint8
 	ToMainMenu,
 	Upgrade,  // Arg is the skill
 	Back,
-	StoryChoice  // Arg is the option
+	StoryChoice,  // Arg is the option
+	SitOut,
+	OpenRecord,
+	SignOffer  // Arg is the offer, or -1 to stay
 };
 
 struct FVC26MenuItem

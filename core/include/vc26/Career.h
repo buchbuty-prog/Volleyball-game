@@ -6,6 +6,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "vc26/RallySim.h"
 
@@ -62,7 +63,28 @@ struct MatchReport {
     float rating = 6.f;
     int skillPoints = 0;
     int scoutGain = 0;
-    MatchStats stats;  // a copy, so the report outlives the match
+    bool satOut = false;  // the team played without you
+    MatchStats stats;     // a copy, so the report outlives the match
+};
+
+// A club that wants you next season. Clubs at the next level count, if you're going up.
+struct TransferOffer {
+    std::string club;
+    int strength = 0;       // how much better the squad is than your usual one
+    int signingPoints = 0;  // skill points up front
+};
+
+struct SeasonRecord {
+    int season = 1;
+    Tier tier = Tier::University;
+    std::string club;
+    int position = 0;
+    int won = 0;
+    int lost = 0;
+    float rating = 0.f;  // 0 if you never played
+    bool champion = false;
+    bool promoted = false;
+    bool mvp = false;
 };
 
 enum class CareerStage : std::uint8_t { League, Final, SeasonOver };
@@ -76,6 +98,7 @@ struct StoryEvent {
     int chemistry[2];   // the locker room
     int scout[2];
     int skillPoints[2];
+    int rest[2];  // matches missed because of the answer
 };
 
 class VC26CORE_API Career {
@@ -108,6 +131,12 @@ public:
     const StoryEvent* pendingStory() const;
     void chooseStory(int option);
 
+    // Injured or benched players sit the next match out. Benching follows low coach trust.
+    int injuredMatches() const { return injured_; }
+    bool benched() const;
+    bool canPlay() const { return injured_ == 0 && !benched(); }
+    MatchReport sitOut();  // the team plays on, and the season moves as it would after a match
+
     // Be a Pro: which Home body is this player, and how well the team plays around them.
     int lockedPlayer() const;
     float teammateSkill() const;
@@ -132,7 +161,15 @@ public:
     int upgradeCost(Skill s) const;
     bool upgrade(Skill s);
 
-    void startNextSeason();
+    // Offers wait at SeasonOver. Pass an index to sign, or -1 to stay.
+    const std::vector<TransferOffer>& offers() const { return offers_; }
+    void startNextSeason(int offer = -1);
+
+    const std::vector<SeasonRecord>& history() const { return history_; }
+    int careerKills() const { return kills_; }
+    int careerAces() const { return aces_; }
+    int careerBlocks() const { return blocks_; }
+    float bestRating() const { return bestRating_; }
 
     std::string save() const;
     static std::optional<Career> load(const std::string& text);
@@ -141,6 +178,7 @@ private:
     void buildLeague();
     int opponentInRound(int round, int team) const;
     void simulateMatch(int a, int b);
+    void finishRound(int opponent, int setsFor, int setsAgainst);
     void applyResult(int a, int b, int setsA, int setsB);
     void finishSeason();
     float rand01() { return nextRand01(rng_); }
@@ -163,6 +201,18 @@ private:
     int rivalWins_ = 0;
     int rivalLosses_ = 0;
     int story_ = -1;
+    int injured_ = 0;       // matches left to miss
+    std::string club_;      // empty: the usual club at this level
+    int clubEdge_ = 0;      // squad strength a signing brought
+    float seasonRatingTotal_ = 0.f;
+    int seasonMatches_ = 0;
+    float lastRating_ = 6.f;
+    int kills_ = 0;
+    int aces_ = 0;
+    int blocks_ = 0;
+    float bestRating_ = 0.f;
+    std::vector<TransferOffer> offers_;
+    std::vector<SeasonRecord> history_;
     bool wonFinal_ = false;
     bool promoted_ = false;
     std::array<LeagueTeam, kTeams> teams_{};

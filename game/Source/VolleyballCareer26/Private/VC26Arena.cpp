@@ -213,9 +213,31 @@ TArray<FVC26MenuItem> AVC26Arena::GetMenuItems() const
 		Items.Add({TEXT("Quit"), EVC26MenuAction::Quit});
 		break;
 	case EVC26Screen::Hub:
-		Items.Add({Career.IsSet() && Career->stage() == vc26::CareerStage::Final ? TEXT("Play the Final") : TEXT("Play Next Match"), EVC26MenuAction::PlayNext});
+		if (Career.IsSet() && !Career->canPlay())
+		{
+			Items.Add({Career->injuredMatches() > 0 ? TEXT("Watch From The Stands (Injured)") : TEXT("Watch From The Bench"), EVC26MenuAction::SitOut});
+		}
+		else
+		{
+			Items.Add({Career.IsSet() && Career->stage() == vc26::CareerStage::Final ? TEXT("Play the Final") : TEXT("Play Next Match"), EVC26MenuAction::PlayNext});
+		}
 		Items.Add({TEXT("Upgrade Skills"), EVC26MenuAction::OpenUpgrades});
+		Items.Add({TEXT("Career Record"), EVC26MenuAction::OpenRecord});
 		Items.Add({TEXT("Main Menu"), EVC26MenuAction::ToMainMenu});
+		break;
+	case EVC26Screen::Record:
+		Items.Add({TEXT("Back"), EVC26MenuAction::Back});
+		break;
+	case EVC26Screen::Transfers:
+		if (Career.IsSet())
+		{
+			const std::vector<vc26::TransferOffer>& Offers = Career->offers();
+			for (int32 i = 0; i < static_cast<int32>(Offers.size()); ++i)
+			{
+				Items.Add({FString::Printf(TEXT("Sign for %s"), UTF8_TO_TCHAR(Offers[i].club.c_str())), EVC26MenuAction::SignOffer, i});
+			}
+			Items.Add({Career->promoted() ? TEXT("Take the move you earned") : TEXT("Stay with your club"), EVC26MenuAction::SignOffer, -1});
+		}
 		break;
 	case EVC26Screen::Upgrades:
 		for (int32 i = 0; i < vc26::kSkills; ++i)
@@ -256,6 +278,11 @@ void AVC26Arena::ConfirmMenu()
 		GoTo(Career->pendingStory() ? EVC26Screen::Story : Career->stage() == vc26::CareerStage::SeasonOver ? EVC26Screen::SeasonEnd : EVC26Screen::Hub);
 		return;
 	case EVC26Screen::SeasonEnd:
+		if (!Career->offers().empty())
+		{
+			GoTo(EVC26Screen::Transfers);
+			return;
+		}
 		Career->startNextSeason();
 		SaveCareer();
 		GoTo(EVC26Screen::Hub);
@@ -293,6 +320,18 @@ void AVC26Arena::ConfirmMenu()
 		}
 		break;
 	case EVC26MenuAction::Back: GoTo(EVC26Screen::Hub); break;
+	case EVC26MenuAction::SitOut:
+		Report = Career->sitOut();
+		SaveCareer();
+		Highlights.Reset();
+		GoTo(EVC26Screen::Report);
+		break;
+	case EVC26MenuAction::OpenRecord: GoTo(EVC26Screen::Record); break;
+	case EVC26MenuAction::SignOffer:
+		Career->startNextSeason(Item.Arg);
+		SaveCareer();
+		GoTo(EVC26Screen::Hub);
+		break;
 	case EVC26MenuAction::StoryChoice:
 		Career->chooseStory(Item.Arg);
 		SaveCareer();
@@ -354,7 +393,7 @@ void AVC26Arena::UpdateMenus()
 	}
 	else if (Pressed({EKeys::Escape, EKeys::Gamepad_FaceButton_Right}))
 	{
-		if (Screen == EVC26Screen::Upgrades)
+		if (Screen == EVC26Screen::Upgrades || Screen == EVC26Screen::Record)
 		{
 			GoTo(EVC26Screen::Hub);
 		}
@@ -946,6 +985,24 @@ void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 		}
 		break;
 	}
+	case 30:
+		GalleryPose = -1;
+		Career.Emplace(std::string("The Rookie"), vc26::Archetype::PowerSpiker, 7u);
+		while (Career->stage() != vc26::CareerStage::SeasonOver)
+		{
+			vc26::MatchStats Great = DemoStats();
+			Great.perfect = 40;
+			Great.kills = 16;
+			Career->recordMatch(2, 0, Great);
+		}
+		GoTo(EVC26Screen::Transfers);
+		break;
+	case 31: Shot(TEXT("30_transfers")); break;
+	case 32: GoTo(EVC26Screen::Record); break;
+	case 33: Shot(TEXT("31_record")); break;
+	case 34: Report = Career->sitOut(); GoTo(EVC26Screen::Report); break;
+	case 35: Shot(TEXT("32_sat_out")); break;
+	case 36: break;  // a shot is saved on the next frame
 	default: FPlatformMisc::RequestExit(false, TEXT("VC26 screenshot tour")); break;
 	}
 }

@@ -40,6 +40,12 @@ struct Register {
         }                                                                      \
     } while (0)
 
+#define REQUIRE(cond)    \
+    do {                 \
+        CHECK(cond);     \
+        if (!(cond)) return; \
+    } while (0)
+
 // Standard 5-1, setter in P1: S, OH, MB, OPP, OH, MB.
 constexpr int S = 1, OH1 = 2, MB1 = 3, OPP = 4, OH2 = 5, MB2 = 6, LIB = 7;
 
@@ -1315,6 +1321,110 @@ TEST(human_block_quality_follows_the_timing) {
     CHECK(humanBlocks(0.f, ContactQuality::Good) == 0);
     CHECK(humanBlocks(0.1f, ContactQuality::Good) > 0);
     CHECK(humanBlocks(0.1f, ContactQuality::Perfect) == 0);
+}
+
+TEST(an_injured_player_sits_out_and_the_season_moves_on) {
+    bool sawInjury = false;
+    for (std::uint32_t seed = 1; seed < 60 && !sawInjury; ++seed) {
+        Career c("A", Archetype::PowerSpiker, seed);
+        while (c.stage() == CareerStage::League && !sawInjury) {
+            c.recordMatch(2, 1, strongGame());
+            const StoryEvent* story = c.pendingStory();
+            const bool ankle = story && std::string(story->title) == "Sore Ankle";
+            if (story) c.chooseStory(0);
+            if (ankle && c.stage() == CareerStage::League) {
+                sawInjury = true;
+                CHECK(c.injuredMatches() == 1 && !c.canPlay());
+                const int played = c.myTeam().played;
+                const int matches = c.matchesPlayed();
+                const MatchReport report = c.sitOut();
+                CHECK(report.satOut);
+                CHECK(report.setsFor == 2 || report.setsAgainst == 2);
+                CHECK(c.myTeam().played == played + 1);
+                CHECK(c.matchesPlayed() == matches);
+                CHECK(c.injuredMatches() == 0 && c.canPlay());
+            }
+        }
+    }
+    CHECK(sawInjury);
+}
+
+TEST(losing_the_coach_means_the_bench_until_the_point_is_made) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    while (!c.benched() && c.stage() == CareerStage::League) {
+        c.recordMatch(0, 2, poorGame());
+        if (c.pendingStory()) c.chooseStory(1);
+    }
+    CHECK(c.benched());
+    const int trust = c.coachTrust();
+    c.sitOut();
+    CHECK(c.coachTrust() > trust);
+}
+
+TEST(a_good_season_brings_offers_and_signing_changes_clubs) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    MatchStats s = strongGame();
+    while (c.stage() != CareerStage::SeasonOver) {
+        c.recordMatch(2, 0, s);
+        if (c.pendingStory()) c.chooseStory(0);
+    }
+    REQUIRE(!c.offers().empty());
+    const TransferOffer offer = c.offers()[0];
+    const int points = c.skillPoints();
+    c.startNextSeason(0);
+    CHECK(c.myTeam().name == offer.club);
+    CHECK(c.skillPoints() == points + offer.signingPoints);
+    CHECK(c.chemistry() == 40);
+    CHECK(c.offers().empty());
+    for (int i = 1; i < Career::kTeams; ++i) CHECK(c.teams()[i].name != offer.club);
+}
+
+TEST(a_poor_season_brings_no_offers_and_staying_keeps_the_club) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    while (c.stage() != CareerStage::SeasonOver) {
+        c.recordMatch(0, 2, poorGame());
+        if (c.pendingStory()) c.chooseStory(0);
+    }
+    CHECK(c.offers().empty());
+    const std::string club = c.myTeam().name;
+    c.startNextSeason();
+    CHECK(c.myTeam().name == club);
+}
+
+TEST(seasons_are_kept_in_the_history) {
+    Career c("A", Archetype::PowerSpiker, 5);
+    winSeason(c);
+    REQUIRE(c.history().size() == 1);
+    const SeasonRecord& first = c.history()[0];
+    CHECK(first.champion && first.promoted);
+    CHECK(first.season == 1 && first.tier == Tier::University);
+    CHECK(first.won + first.lost == Career::kRounds);
+    CHECK(first.rating > 7.f);
+    CHECK(c.careerKills() > 0);
+}
+
+TEST(transfers_and_history_survive_a_save) {
+    Career c("Dana Levi", Archetype::BlockSpecialist, 9);
+    MatchStats s = strongGame();
+    while (c.stage() != CareerStage::SeasonOver) {
+        c.recordMatch(2, 0, s);
+        if (c.pendingStory()) c.chooseStory(0);
+    }
+    REQUIRE(!c.offers().empty());
+    const std::optional<Career> back = Career::load(c.save());
+    REQUIRE(back.has_value());
+    CHECK(back->offers().size() == c.offers().size());
+    CHECK(back->offers()[0].club == c.offers()[0].club);
+    CHECK(back->history().size() == 1);
+    CHECK(back->history()[0].club == c.history()[0].club);
+    CHECK(back->save() == c.save());
+
+    Career moved = *back;
+    moved.startNextSeason(0);
+    const std::optional<Career> again = Career::load(moved.save());
+    REQUIRE(again.has_value());
+    CHECK(again->myTeam().name == moved.myTeam().name);
+    CHECK(again->save() == moved.save());
 }
 
 int main() {

@@ -39,4 +39,6 @@ private:
 	void DrawReport(const AVC26Arena& Arena, const vc26::Career& Career);
 	void DrawSeasonEnd(const vc26::Career& Career);
 	void DrawStory(const AVC26Arena& Arena, const vc26::Career& Career);
+	void DrawTransfers(const AVC26Arena& Arena, const vc26::Career& Career);
+	void DrawRecord(const AVC26Arena& Arena, const vc26::Career& Career);
 };

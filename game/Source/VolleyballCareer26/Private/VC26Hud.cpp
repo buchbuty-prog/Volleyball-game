@@ -218,6 +218,13 @@ void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
 	Label(Career.isRivalMatch() ? FString::Printf(TEXT("RIVAL MATCH: %s"), *Str(vc26::Career::rivalName())) : FString(TEXT("NEXT MATCH")), 84.f, 198.f, Gold, 1.3f);
 	Label(FString::Printf(TEXT("vs  %s"), *Str(Rival.name)), 84.f, 244.f, FLinearColor::White, 2.f);
 	Label(FString::Printf(TEXT("Strength %d   |   %d-%d this season"), Rival.strength, Rival.won, Rival.lost), 84.f, 318.f, Muted, 1.2f);
+	if (!Career.canPlay())
+	{
+		const FString Status = Career.injuredMatches() > 0
+			? FString::Printf(TEXT("INJURED: out for %d more %s"), Career.injuredMatches(), Career.injuredMatches() == 1 ? TEXT("match") : TEXT("matches"))
+			: FString(TEXT("BENCHED: the coach has lost trust in you"));
+		Label(Status, 84.f, 350.f, FLinearColor(0.95f, 0.4f, 0.35f), 1.05f);
+	}
 
 	// Scouts.
 	Panel(60.f, 400.f, 800.f, 130.f, Ink);
@@ -226,12 +233,12 @@ void AVC26Hud::DrawHub(const AVC26Arena& Arena, const vc26::Career& Career)
 	Label(TEXT("Reach 100% to earn a move up, even without the title"), 84.f, 490.f, Muted, 1.f);
 
 	DrawItems(Arena, 60.f, 560.f, 800.f);
-	Label(FString::Printf(TEXT("Skill points: %d      Average rating: %.1f      Trophies: %d"), Career.skillPoints(), Career.averageRating(), Career.trophies()), 60.f, 780.f, FLinearColor::White, 1.2f);
-	Label(TEXT("Coach trust"), 60.f, 830.f, Muted, 1.05f);
-	DrawMeter(280.f, 840.f, 580.f, Career.coachTrust() / 100.f, FLinearColor(0.3f, 0.75f, 0.45f));
-	Label(TEXT("Chemistry"), 60.f, 868.f, Muted, 1.05f);
-	DrawMeter(280.f, 878.f, 580.f, Career.chemistry() / 100.f, FLinearColor(0.35f, 0.55f, 0.95f));
-	Label(FString::Printf(TEXT("vs %s: %d-%d"), *Str(vc26::Career::rivalName()), Career.rivalWins(), Career.rivalLosses()), 60.f, 906.f, Muted, 1.05f);
+	Label(FString::Printf(TEXT("Skill points: %d      Average rating: %.1f      Trophies: %d"), Career.skillPoints(), Career.averageRating(), Career.trophies()), 60.f, 836.f, FLinearColor::White, 1.2f);
+	Label(TEXT("Coach trust"), 60.f, 882.f, Muted, 1.05f);
+	DrawMeter(280.f, 892.f, 580.f, Career.coachTrust() / 100.f, FLinearColor(0.3f, 0.75f, 0.45f));
+	Label(TEXT("Chemistry"), 60.f, 920.f, Muted, 1.05f);
+	DrawMeter(280.f, 930.f, 580.f, Career.chemistry() / 100.f, FLinearColor(0.35f, 0.55f, 0.95f));
+	Label(FString::Printf(TEXT("vs %s: %d-%d"), *Str(vc26::Career::rivalName()), Career.rivalWins(), Career.rivalLosses()), 60.f, 958.f, Muted, 1.05f);
 
 	DrawTable(Career, 1000.f, 180.f);
 }
@@ -275,6 +282,15 @@ void AVC26Hud::DrawReport(const AVC26Arena& Arena, const vc26::Career& Career)
 	Panel(360.f, 130.f, 1200.f, 8.f, Report.won ? Gold : FLinearColor(0.6f, 0.1f, 0.1f));
 	DrawCentred(Report.won ? TEXT("VICTORY") : TEXT("DEFEAT"), 164.f, Report.won ? Gold : FLinearColor(0.95f, 0.4f, 0.35f), 3.f);
 	DrawCentred(FString::Printf(TEXT("Sets %d - %d"), Report.setsFor, Report.setsAgainst), 262.f, FLinearColor::White, 1.5f);
+
+	if (Report.satOut)
+	{
+		DrawCentred(TEXT("You watched this one."), 400.f, Muted, 1.8f);
+		DrawCentred(FString::Printf(TEXT("+%d skill point from film and gym work"), Report.skillPoints), 500.f, FLinearColor::White, 1.4f);
+		DrawCentred(FString::Printf(TEXT("League position: %d"), Career.leaguePosition()), 560.f, FLinearColor::White, 1.4f);
+		DrawCentred(TEXT("Press Enter to continue"), 870.f, Muted, 1.2f);
+		return;
+	}
 
 	Label(TEXT("MATCH RATING"), 440.f, 340.f, Muted, 1.2f);
 	Label(FString::Printf(TEXT("%.1f"), Report.rating), 440.f, 380.f, Report.rating >= 7.f ? Gold : FLinearColor::White, 5.f);
@@ -331,7 +347,68 @@ void AVC26Hud::DrawSeasonEnd(const vc26::Career& Career)
 		Next = TEXT("World champions. Defend your title next season.");
 	}
 	DrawCentred(Next, 620.f, Career.promoted() ? Gold : FLinearColor::White, 1.8f);
-	DrawCentred(TEXT("Press Enter for next season"), 820.f, Muted, 1.2f);
+	if (!Career.history().empty() && Career.history().back().mvp)
+	{
+		DrawCentred(TEXT("League MVP"), 710.f, Gold, 2.f);
+	}
+	DrawCentred(Career.offers().empty() ? TEXT("Press Enter for next season") : TEXT("Press Enter: clubs are calling"), 820.f, Muted, 1.2f);
+}
+
+void AVC26Hud::DrawTransfers(const AVC26Arena& Arena, const vc26::Career& Career)
+{
+	Panel(360.f, 170.f, 1200.f, 740.f, Ink);
+	Panel(360.f, 170.f, 1200.f, 8.f, Gold);
+	DrawCentred(TEXT("TRANSFER WINDOW"), 210.f, FLinearColor::White, 2.4f);
+	DrawCentred(TEXT("A new club means a new coach and a locker room to win over"), 300.f, Muted, 1.2f);
+	DrawItems(Arena, 460.f, 380.f, 1000.f);
+
+	const TArray<FVC26MenuItem> Items = Arena.GetMenuItems();
+	if (Items.IsValidIndex(Arena.GetMenuIndex()) && Items[Arena.GetMenuIndex()].Arg >= 0)
+	{
+		const vc26::TransferOffer& Offer = Career.offers()[Items[Arena.GetMenuIndex()].Arg];
+		DrawCentred(FString::Printf(TEXT("Squad strength +%d   |   +%d skill points on signing"), Offer.strength, Offer.signingPoints), 680.f, Gold, 1.4f);
+	}
+	else
+	{
+		DrawCentred(TEXT("Loyalty lifts the locker room"), 680.f, FLinearColor::White, 1.4f);
+	}
+}
+
+void AVC26Hud::DrawRecord(const AVC26Arena& Arena, const vc26::Career& Career)
+{
+	Panel(200.f, 90.f, 1520.f, 900.f, Ink);
+	Panel(200.f, 90.f, 1520.f, 8.f, Gold);
+	DrawCentred(FString::Printf(TEXT("%s - CAREER RECORD"), *Str(Career.name())), 120.f, FLinearColor::White, 2.f);
+	DrawCentred(FString::Printf(TEXT("%d matches   |   %d kills   |   %d aces   |   %d stuff blocks   |   Best rating %.1f   |   Trophies %d"),
+		Career.matchesPlayed(), Career.careerKills(), Career.careerAces(), Career.careerBlocks(), Career.bestRating(), Career.trophies()), 190.f, Gold, 1.15f);
+
+	const std::vector<vc26::SeasonRecord>& History = Career.history();
+	if (History.empty())
+	{
+		DrawCentred(TEXT("Your first season is still being written."), 420.f, Muted, 1.5f);
+	}
+	const float Columns[] = {250.f, 370.f, 860.f, 1140.f, 1290.f, 1420.f};
+	const TCHAR* const Titles[] = {TEXT("Yr"), TEXT("Club"), TEXT("Level"), TEXT("Place"), TEXT("W-L"), TEXT("Rating")};
+	for (int32 i = 0; i < UE_ARRAY_COUNT(Columns) && !History.empty(); ++i)
+	{
+		Label(Titles[i], Columns[i], 250.f, Muted, 1.1f);
+	}
+
+	// The most recent seasons, newest first.
+	const int32 Shown = FMath::Min(static_cast<int32>(History.size()), 9);
+	for (int32 i = 0; i < Shown; ++i)
+	{
+		const vc26::SeasonRecord& Season = History[History.size() - 1 - i];
+		const float Y = 296.f + i * 62.f;
+		Panel(230.f, Y - 6.f, 1460.f, 54.f, InkLight);
+		Label(FString::FromInt(Season.season), Columns[0], Y, FLinearColor::White, 1.2f);
+		Label(Str(Season.club), Columns[1], Y, FLinearColor::White, 1.2f);
+		Label(Str(vc26::toString(Season.tier)), Columns[2], Y, Muted, 1.05f);
+		Label(Season.champion ? FString(TEXT("Champions")) : FString::FromInt(Season.position), Columns[3], Y, Season.champion ? Gold : FLinearColor::White, Season.champion ? 0.9f : 1.2f);
+		Label(FString::Printf(TEXT("%d-%d"), Season.won, Season.lost), Columns[4], Y, FLinearColor::White, 1.2f);
+		Label(FString::Printf(TEXT("%.1f%s"), Season.rating, Season.mvp ? TEXT("  MVP") : TEXT("")), Columns[5], Y, Season.mvp ? Gold : FLinearColor::White, 1.2f);
+	}
+	DrawItems(Arena, 760.f, 900.f, 400.f);
 }
 
 void AVC26Hud::DrawScoreBug(const AVC26Arena& Arena, const vc26::RallySim& Sim)
@@ -482,5 +559,7 @@ void AVC26Hud::DrawHUD()
 	case EVC26Screen::Report: if (Career) { DrawReport(*Arena, *Career); } break;
 	case EVC26Screen::SeasonEnd: if (Career) { DrawSeasonEnd(*Career); } break;
 	case EVC26Screen::Story: if (Career) { DrawStory(*Arena, *Career); } break;
+	case EVC26Screen::Transfers: if (Career) { DrawTransfers(*Arena, *Career); } break;
+	case EVC26Screen::Record: if (Career) { DrawRecord(*Arena, *Career); } break;
 	}
 }
