@@ -196,6 +196,7 @@ private:
 	void BuildPlayers();
 	bool BuildAthletes();
 	void AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward, const FVector& MoveDir, float Speed, float DeltaSeconds);
+	void AnimateReferee(float DeltaSeconds);
 	void BuildBall();
 	void BuildLights();
 	void ApplyVenue(bool bBeach);
@@ -242,6 +243,15 @@ private:
 
 	UPROPERTY()
 	TArray<TObjectPtr<UAnimSequence>> ClipAnims;
+
+	UPROPERTY()
+	TObjectPtr<USkeletalMeshComponent> Referee;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> RefereeShapes;
+
+	FVector RefereeSpot = FVector::ZeroVector;
+	FVC26AthleteDrive RefereeDrive;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> BallShape;

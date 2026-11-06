@@ -241,9 +241,10 @@ void AVC26Arena::BuildCourt()
 	}
 
 	// Referee stand at the far post.
-	AddShape(CubeMesh, FVector(0, PostY + 70.f, 90.f), FVector(40.f, 40.f, 180.f), FLinearColor(0.3f, 0.32f, 0.36f));
-	AddShape(CylinderMesh, FVector(0, PostY + 70.f, 225.f), FVector(32.f, 32.f, 90.f), FLinearColor(0.08f, 0.08f, 0.1f));
-	AddShape(SphereMesh, FVector(0, PostY + 70.f, 285.f), FVector(24.f), SkinTones[0]);
+	RefereeSpot = FVector(0.f, PostY + 70.f, 120.f);
+	AddShape(CubeMesh, RefereeSpot - FVector(0.f, 0.f, 60.f), FVector(60.f, 60.f, 120.f), FLinearColor(0.3f, 0.32f, 0.36f));
+	RefereeShapes.Add(AddShape(CylinderMesh, RefereeSpot + FVector(0.f, 0.f, 45.f), FVector(32.f, 32.f, 90.f), FLinearColor(0.08f, 0.08f, 0.1f)));
+	RefereeShapes.Add(AddShape(SphereMesh, RefereeSpot + FVector(0.f, 0.f, 105.f), FVector(24.f), SkinTones[0]));
 
 	// LED boards around the court.
 	const float BoardY = 690.f;
@@ -488,7 +489,54 @@ bool AVC26Arena::BuildAthletes()
 		}
 		Numbers[i]->SetVisibility(false);  // the kit already carries a number
 	}
+
+	// The referee is the same body in plain black, on the stand.
+	const FLinearColor Black(0.015f, 0.015f, 0.02f);
+	Referee = NewObject<USkeletalMeshComponent>(this);
+	Referee->SetMobility(EComponentMobility::Movable);
+	Referee->SetSkeletalMeshAsset(Mesh);
+	Referee->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Referee->SetAffectDistanceFieldLighting(false);
+	Referee->SetAffectDynamicIndirectLighting(false);
+	Referee->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+	Referee->SetupAttachment(Root);
+	Referee->RegisterComponent();
+	Referee->SetAnimInstanceClass(UVC26AthleteAnim::StaticClass());
+	Referee->SetWorldLocationAndRotation(RefereeSpot, FRotator(0.f, 180.f, 0.f));  // +Y on the body faces the court
+	UMaterialInstanceDynamic* Kit0 = UMaterialInstanceDynamic::Create(Kit, this);
+	Kit0->SetVectorParameterValue(TEXT("Team"), Black);
+	Kit0->SetVectorParameterValue(TEXT("Shorts"), Black);
+	Kit0->SetVectorParameterValue(TEXT("Print"), Black);
+	Kit0->SetVectorParameterValue(TEXT("Skin"), AthleteSkin[1]);
+	Referee->SetMaterial(0, Kit0);
+	RefereeDrive.Clip = ClipAnims[static_cast<int32>(EClip::Idle)];
+	for (UStaticMeshComponent* Shape : RefereeShapes)
+	{
+		Shape->SetVisibility(false);
+	}
 	return true;
+}
+
+void AVC26Arena::AnimateReferee(float DeltaSeconds)
+{
+	if (!Referee)
+	{
+		return;
+	}
+	const float Length = RefereeDrive.Clip->GetPlayLength();
+	RefereeDrive.Time = FMath::Fmod(RefereeDrive.Time + DeltaSeconds, Length);
+
+	// An arm goes up to give the point, and the eyes follow the ball.
+	const vc26::RallyPhase Phase = Sim->phase();
+	const bool bSignal = Phase == vc26::RallyPhase::PointOver;
+	RefereeDrive.Cheer = FMath::FInterpTo(RefereeDrive.Cheer, bSignal ? 1.f : 0.f, DeltaSeconds, 10.f);
+	RefereeDrive.LookWeight = 0.9f;
+	const FTransform& Body = Referee->GetComponentTransform();
+	RefereeDrive.Look = Body.InverseTransformPosition(SimToWorld(Sim->ball().pos));
+	if (UVC26AthleteAnim* Anim = Cast<UVC26AthleteAnim>(Referee->GetAnimInstance()))
+	{
+		Anim->Drive = RefereeDrive;
+	}
 }
 
 void AVC26Arena::AnimateAthlete(int32 Player, EPose Pose, const FVector& Feet, const FVector& Forward, const FVector& MoveDir, float Speed, float DeltaSeconds)
@@ -1013,6 +1061,7 @@ void AVC26Arena::SyncShapes(float DeltaSeconds)
 			AnimateFigure(i, DeltaSeconds * AnimationRate);
 		}
 	}
+	AnimateReferee(DeltaSeconds);
 	UpdateBall(DeltaSeconds);
 
 	const bool bMatch = GetScreen() == EVC26Screen::Match && !IsReplaying();
