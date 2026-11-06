@@ -837,10 +837,16 @@ void AVC26Arena::HandleEvents()
 void AVC26Arena::RunScreenshotTour(float DeltaSeconds)
 {
 	TourTime += DeltaSeconds;
+	++TourFrames;
+	TourSlowest = FMath::Max(TourSlowest, DeltaSeconds);
+	TourSeconds += DeltaSeconds;
 	auto Shot = [this](const TCHAR* Name)
 	{
 		FScreenshotRequest::RequestScreenshot(ShotDir / FString(Name) + TEXT(".png"), true, false);
-		UE_LOG(LogVC26, Log, TEXT("Tour shot: %s"), Name);
+		UE_LOG(LogVC26, Log, TEXT("Tour shot: %s (%.1f ms a frame, slowest %.1f)"), Name, TourSeconds * 1000.f / FMath::Max(TourFrames, 1), TourSlowest * 1000.f);
+		TourFrames = 0;
+		TourSeconds = 0.f;
+		TourSlowest = 0.f;
 	};
 
 	// The last steps wait for a moment in a live match, with a time limit.

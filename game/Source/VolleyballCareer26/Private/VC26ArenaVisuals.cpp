@@ -67,6 +67,7 @@ namespace
 		{TEXT("A_Dive"), 0.f, 1.6f, false, 0.1f},
 		{TEXT("A_Celebrate"), 0.f, 1.2f, true, 0.4f},
 	};
+	constexpr int32 CrowdStride = 5;       // parts per shirt colour in CrowdGroups
 	constexpr float DiveTravel = 0.3f;     // the share of the dive animation's own travel that is kept
 	constexpr float RunClipSpeed = 533.f;  // cm/s the run clip covers, so the feet match the floor
 	constexpr float SwingSeconds = 0.28f;  // how long a touch is held after contact
@@ -279,15 +280,33 @@ void AVC26Arena::AddCrowdBlock(const FVector& Start, const FVector& AlongRow, co
 		return Group;
 	};
 
-	// Each shirt colour has its own heads, so a group can jump as one.
-	TArray<UInstancedStaticMeshComponent*> Shirts;
-	TArray<UInstancedStaticMeshComponent*> Heads;
+	// Each shirt colour has its own bodies, heads, hair and arms, so a group can
+	// jump as one. They sit next to each other in CrowdGroups, CrowdStride apart.
+	struct FFans
+	{
+		UInstancedStaticMeshComponent* Body;
+		UInstancedStaticMeshComponent* Shoulders;
+		UInstancedStaticMeshComponent* Head;
+		UInstancedStaticMeshComponent* Hair;
+		UInstancedStaticMeshComponent* Arms;
+	};
+	TArray<FFans> Fans;
 	for (const FLinearColor& Color : ShirtColors)
 	{
-		Shirts.Add(AddInstances(CylinderMesh, Color));
-		Heads.Add(AddInstances(SphereMesh, SkinTones[Heads.Num() % UE_ARRAY_COUNT(SkinTones)]));
+		const int32 Index = Fans.Num();
+		FFans Group;
+		Group.Body = AddInstances(SphereMesh, Color);
+		Group.Shoulders = AddInstances(SphereMesh, Color);
+		Group.Head = AddInstances(SphereMesh, SkinTones[Index % UE_ARRAY_COUNT(SkinTones)]);
+		Group.Hair = AddInstances(SphereMesh, HairColors[Index % UE_ARRAY_COUNT(HairColors)]);
+		Group.Arms = AddInstances(CylinderMesh, Color);
+		Group.Arms->SetVisibility(false);  // they go up on big points
+		CrowdArms.Add(Group.Arms);
+		Fans.Add(Group);
 	}
 
+	const FRotator Facing = (-OutwardStep.GetSafeNormal2D()).Rotation();
+	const FVector Side = FRotationMatrix(Facing).GetUnitAxis(EAxis::Y);
 	FRandomStream Random(static_cast<int32>(Start.X + Start.Y * 3.f));
 	for (int32 Row = 0; Row < Rows; ++Row)
 	{
@@ -300,9 +319,17 @@ void AVC26Arena::AddCrowdBlock(const FVector& Start, const FVector& AlongRow, co
 			const float Jitter = Random.FRandRange(-8.f, 8.f);
 			const FVector Spot = Start + AlongRow * static_cast<float>(Seat) + OutwardStep * static_cast<float>(Row) + FVector(Jitter, Jitter, 0.f);
 			const float Tall = Random.FRandRange(0.9f, 1.1f);
-			const int32 Group = Random.RandRange(0, Shirts.Num() - 1);
-			Shirts[Group]->AddInstance(FTransform(FRotator::ZeroRotator, Spot + FVector(0, 0, 35.f * Tall), FVector(0.42f, 0.42f, 0.7f * Tall)));
-			Heads[Group]->AddInstance(FTransform(FRotator::ZeroRotator, Spot + FVector(0, 0, 80.f * Tall), FVector(0.22f)));
+			const FFans& Group = Fans[Random.RandRange(0, Fans.Num() - 1)];
+			const FRotator Turn = Facing + FRotator(0.f, Random.FRandRange(-18.f, 18.f), 0.f);
+			Group.Body->AddInstance(FTransform(Turn, Spot + FVector(0, 0, 36.f * Tall), FVector(0.3f, 0.38f, 0.62f * Tall)));
+			Group.Shoulders->AddInstance(FTransform(Turn, Spot + FVector(0, 0, 60.f * Tall), FVector(0.25f, 0.46f, 0.2f)));
+			Group.Head->AddInstance(FTransform(Turn, Spot + FVector(0, 0, 84.f * Tall), FVector(0.19f, 0.17f, 0.22f)));
+			Group.Hair->AddInstance(FTransform(Turn, Spot + FVector(-2.f, 0, 89.f * Tall), FVector(0.2f, 0.18f, 0.16f)));
+			for (const float Out : {-1.f, 1.f})
+			{
+				const FRotator Raised = Turn + FRotator(0.f, 0.f, Out * 12.f);
+				Group.Arms->AddInstance(FTransform(Raised, Spot + Side * Out * 24.f + FVector(0, 0, 88.f * Tall), FVector(0.09f, 0.09f, 0.6f)));
+			}
 		}
 	}
 }
@@ -1037,10 +1064,19 @@ void AVC26Arena::UpdateCrowd(float DeltaSeconds)
 	bCrowdSettled = CrowdExcitement <= 0.f;
 
 	const float Time = GetWorld()->GetTimeSeconds();
+	const bool bArmsUp = CrowdExcitement > 0.2f;
+	if (bArmsUp != bCrowdArmsUp)
+	{
+		bCrowdArmsUp = bArmsUp;
+		for (UInstancedStaticMeshComponent* Arms : CrowdArms)
+		{
+			Arms->SetVisibility(bArmsUp);
+		}
+	}
 	for (int32 i = 0; i < CrowdGroups.Num(); ++i)
 	{
-		// A shirt and its heads are neighbours in the list and move together.
-		const float Phase = static_cast<float>(i / 2) * 1.3f;
+		// One shirt colour's parts are neighbours in the list and move together.
+		const float Phase = static_cast<float>(i / CrowdStride) * 1.3f;
 		CrowdGroups[i]->SetRelativeLocation(FVector(0.f, 0.f, FMath::Abs(FMath::Sin(Time * 8.f + Phase)) * 26.f * CrowdExcitement));
 	}
 }

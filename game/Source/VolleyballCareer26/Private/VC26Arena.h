@@ -248,6 +248,9 @@ private:
 	TArray<TObjectPtr<UInstancedStaticMeshComponent>> CrowdGroups;
 
 	UPROPERTY()
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> CrowdArms;
+
+	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> ControlledMarker;
 
 	UPROPERTY()
@@ -305,6 +308,7 @@ private:
 	float BallSpin = 0.f;
 	float CrowdExcitement = 0.f;
 	bool bCrowdSettled = true;
+	bool bCrowdArmsUp = false;
 	float CameraSide = 0.f;
 	TArray<FVector> TrailPoints;
 	int32 Difficulty = 1;  // 0 easy, 1 normal, 2 hard
@@ -313,6 +317,9 @@ private:
 	bool bTouchWasHeld = false;
 	FString ShotDir;
 	float TourTime = 0.f;
+	int32 TourFrames = 0;
+	float TourSeconds = 0.f;
+	float TourSlowest = 0.f;
 	int32 TourStep = 0;
 	vc26::TouchControls Touch;
 	FFigure Figures[12];
