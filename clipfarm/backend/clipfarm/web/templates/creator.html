@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }}{% endblock %}
+{% block content %}
+<p><a href="/">&larr; All creators</a></p>
+<h1>{{ c.name }} {% if c.status.value == 'suspended' %}<span class="badge off">suspended</span>{% endif %}</h1>
+
+<section class="card">
+  <h2>Rights gate today ({{ today }})</h2>
+  <table>
+    {% for d in decisions %}
+    <tr><td>{{ d.platform.label }}</td>
+      <td>{% if d.allowed %}<span class="badge on">Cleared</span> by agreement #{{ d.agreement_id }}
+          {% else %}<span class="badge off">Blocked</span>
+            <ul class="reasons">{% for r in d.reasons %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>Permission agreements</h2>
+  <table>
+    <thead><tr><th>#</th><th>State</th><th>Platforms</th><th>Posting to</th><th>Creator share</th><th>Valid</th><th>File</th><th></th></tr></thead>
+    <tbody>
+    {% for a in c.agreements %}
+      <tr>
+        <td>{{ a.id }}</td>
+        <td><span class="badge {{ 'on' if states[a.id] == 'active' else 'off' }}">{{ states[a.id] }}</span>
+          {% if a.revoked_reason %}<div class="muted small">{{ a.revoked_reason }} ({{ a.revoked_by }})</div>{% endif %}</td>
+        <td>{{ a.allowed_platforms | join(', ') }}</td>
+        <td>{{ 'my accounts' if a.posting_mode.value == 'our_accounts' else "creator's accounts" }}</td>
+        <td>{{ a.revenue_share_creator_pct }}%</td>
+        <td>{{ a.start_date }} → {{ a.expiry_date }}</td>
+        <td><a href="/agreements/{{ a.id }}/file" target="_blank" rel="noopener">{{ a.file_name }}</a>
+            <div class="muted small mono" title="SHA-256">{{ a.file_sha256[:12] }}…</div></td>
+        <td>{% if a.status.value == 'active' %}
+          <details><summary>Revoke</summary>
+            <form method="post" action="/agreements/{{ a.id }}/revoke" class="stack">
+              <input type="hidden" name="creator_id" value="{{ c.id }}">
+              <input name="reason" placeholder="Reason (required)" required>
+              <button class="danger">Revoke agreement</button>
+            </form></details>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">No agreement yet. Nothing from this creator can enter the pipeline.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small">Terms can't be edited after saving. To change terms, add a new agreement and revoke the old one, so the history is kept.</p>
+
+  <h3>Add agreement</h3>
+  <form method="post" action="/creators/{{ c.id }}/agreements" enctype="multipart/form-data" class="grid">
+    <label class="wide">Signed agreement (PDF, PNG or JPEG) <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg" required></label>
+    <fieldset class="wide"><legend>Allowed platforms</legend>
+      {% for p in Platform %}<label class="check"><input type="checkbox" name="allowed_platforms" value="{{ p.value }}"> {{ p.label }}</label>{% endfor %}
+    </fieldset>
+    <label>Post to
+      <select name="posting_mode" required>
+        <option value="our_accounts">My accounts</option>
+        <option value="creator_accounts">Creator's accounts</option>
+      </select></label>
+    <label>Creator revenue share (%) <input name="revenue_share_creator_pct" type="number" min="0" max="100" step="0.01" required></label>
+    <label>Start date <input name="start_date" type="date" required></label>
+    <label>Expiry date <input name="expiry_date" type="date" required></label>
+    <label class="wide">Notes <textarea name="notes" rows="2"></textarea></label>
+    <button>Save agreement</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Channels</h2>
+  <table>
+    {% for ch in c.channels %}
+    <tr><td>{{ ch.platform.label }}</td><td>{% if ch.url %}<a href="{{ ch.url }}" rel="noopener noreferrer" target="_blank">{{ ch.handle }}</a>{% else %}{{ ch.handle }}{% endif %}</td>
+      <td class="muted small">{{ 'OAuth connected' if ch.oauth_connected_at else 'not connected (step 2)' }}</td>
+      <td><form method="post" action="/channels/{{ ch.id }}/delete" class="inline">
+        <input type="hidden" name="creator_id" value="{{ c.id }}"><button class="link">Remove</button></form></td></tr>
+    {% else %}<tr><td class="muted">No channels yet.</td></tr>{% endfor %}
+  </table>
+  <form method="post" action="/creators/{{ c.id }}/channels" class="row">
+    <select name="platform">{% for p in Platform %}<option value="{{ p.value }}">{{ p.label }}</option>{% endfor %}</select>
+    <input name="handle" placeholder="@handle" required>
+    <input name="url" type="url" placeholder="https://… (optional)">
+    <button>Add channel</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Protected names &amp; places</h2>
+  <p class="muted">Children's names, schools, cities and other places. Titles, captions and hashtags containing any of these are blocked. They're shown masked here and never written to the audit log.</p>
+  <ul class="terms">
+    {% for t in c.protected_terms %}
+      <li><span class="mono">{{ t.masked }}</span> <span class="muted small">{{ t.kind.value.replace('_', ' ') }}</span>
+        <form method="post" action="/protected-terms/{{ t.id }}/delete" class="inline">
+          <input type="hidden" name="creator_id" value="{{ c.id }}"><button class="link">Remove</button></form></li>
+    {% else %}<li class="muted">None yet. Add each child's first and full name, school and town.</li>{% endfor %}
+  </ul>
+  <form method="post" action="/creators/{{ c.id }}/protected-terms" class="row" autocomplete="off">
+    <input name="term" placeholder="e.g. a child's name" required>
+    <select name="kind">{% for k in TermKind %}<option value="{{ k.value }}">{{ k.value.replace('_', ' ') }}</option>{% endfor %}</select>
+    <button>Protect</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Creator details</h2>
+  <form method="post" action="/creators/{{ c.id }}/edit" class="grid">
+    <label>Name <input name="name" value="{{ c.name }}" required></label>
+    <label>Contact email <input name="contact_email" type="email" value="{{ c.contact_email or '' }}"></label>
+    <label class="wide">Notes <textarea name="notes" rows="2">{{ c.notes or '' }}</textarea></label>
+    <button>Save</button>
+  </form>
+  <form method="post" action="/creators/{{ c.id }}/status" class="row">
+    {% if c.status.value == 'active' %}
+      <input type="hidden" name="status" value="suspended"><input name="reason" placeholder="Reason">
+      <button class="danger">Suspend creator</button>
+    {% else %}
+      <input type="hidden" name="status" value="active"><button>Reactivate creator</button>
+    {% endif %}
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent activity</h2>
+  <table class="small">{% for e in log %}
+    <tr><td class="mono">{{ e.at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td>
+      <td class="muted">{{ e.details.get('purpose', '') }} {{ e.details.get('reasons', []) | join('; ') }}</td></tr>
+  {% else %}<tr><td class="muted">Nothing yet.</td></tr>{% endfor %}</table>
+  <p><a href="/audit">Full audit log →</a></p>
+</section>
+{% endblock %}

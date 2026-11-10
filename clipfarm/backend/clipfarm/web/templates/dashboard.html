@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% from "_platforms.html" import badges with context %}
+{% block title %}Creators &amp; rights{% endblock %}
+{% block content %}
+<h1>Creators &amp; rights</h1>
+<p class="muted">Content only enters the pipeline for platforms shown in green: an active, unexpired, signed agreement covers them today ({{ today }}).</p>
+
+{% if expiring %}
+<section class="card warn">
+  <h2>Agreements expiring in the next 30 days</h2>
+  <ul>{% for a in expiring %}<li><a href="/creators/{{ a.creator_id }}">{{ a.creator.name }}</a>: agreement #{{ a.id }} expires {{ a.expiry_date }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <table>
+    <thead><tr><th>Creator</th><th>Status</th><th>Cleared platforms today</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr><td><a href="/creators/{{ r.creator.id }}">{{ r.creator.name }}</a></td>
+          <td>{{ r.creator.status.value }}</td>
+          <td>{{ badges(r.platforms) }}</td></tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">No creators yet. Add one below.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Add a creator</h2>
+  <form method="post" action="/creators" class="grid">
+    <label>Name <input name="name" required></label>
+    <label>Contact email <input name="contact_email" type="email"></label>
+    <label class="wide">Notes <textarea name="notes" rows="2"></textarea></label>
+    <button>Add creator</button>
+  </form>
+</section>
+{% endblock %}

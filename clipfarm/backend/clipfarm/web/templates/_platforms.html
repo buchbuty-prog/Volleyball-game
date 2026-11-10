@@ -1,0 +1,3 @@
+{% macro badges(allowed) -%}
+{% for p in Platform %}<span class="badge {{ 'on' if p in allowed else 'off' }}" title="{{ p.label }}: {{ 'cleared' if p in allowed else 'blocked' }}">{{ p.label }}</span>{% endfor %}
+{%- endmacro %}

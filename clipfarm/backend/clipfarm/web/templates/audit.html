@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Audit log{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<form method="get" class="row">
+  <input name="actor" value="{{ actor }}" placeholder="Who (username)">
+  <input name="action" value="{{ action }}" placeholder="Action prefix, e.g. rights.">
+  <button>Filter</button>
+</form>
+<section class="card">
+<table class="small">
+  <thead><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>On</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr class="{{ 'deny' if e.action.endswith('denied') or e.action.endswith('failed') else '' }}">
+      <td class="mono">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td>
+      <td>{{ e.entity_type }}{% if e.entity_id %} #{{ e.entity_id }}{% endif %}</td>
+      <td class="mono details">{{ e.details | tojson }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">No entries.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</section>
+<p>{% if page > 1 %}<a href="?actor={{ actor|urlencode }}&action={{ action|urlencode }}&page={{ page-1 }}">← Newer</a>{% endif %}
+   {% if has_more %}<a href="?actor={{ actor|urlencode }}&action={{ action|urlencode }}&page={{ page+1 }}">Older →</a>{% endif %}</p>
+{% endblock %}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ClipFarm{% endblock %} · ClipFarm</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">ClipFarm</a>
+  {% if user %}
+  <nav>
+    <a href="/">Creators &amp; rights</a>
+    <a href="/audit">Audit log</a>
+  </nav>
+  <form method="post" action="/logout" class="inline"><span class="muted">{{ user.username }}</span>
+    <button class="link">Log out</button></form>
+  {% endif %}
+</header>
+<main>
+  {% for m in messages %}<div class="flash {{ m.kind }}" role="status">{{ m.message }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
